@@ -25,6 +25,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.15.22",
     "ty>=0.0.62",
     "pre-commit>=4.6.1",
@@ -89,3 +90,17 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.coverage.paths]
+source = ["fastapi_injected"]
+
+[tool.coverage.run]
+source = ["fastapi_injected"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "@abstractmethod",
+    "@overload",
+    "if TYPE_CHECKING:",
+]
