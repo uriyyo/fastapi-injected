@@ -2,6 +2,7 @@ import inspect
 from typing import cast
 
 from fastapi.dependencies.models import Dependant
+from fastapi.dependencies.utils import analyze_param
 
 from .types import Decorator, Func, HasSignature, Inejected
 
@@ -18,7 +19,19 @@ def prepare_sign(sign: inspect.Signature) -> inspect.Signature:
 
         return param
 
-    return sign.replace(parameters=[_update_param(param) for param in sign.parameters.values()])
+    def _is_depends(param: inspect.Parameter) -> bool:
+        result = analyze_param(
+            param_name=param.name,
+            annotation=param.annotation,
+            value=param.default,
+            is_path_param=False,
+        )
+
+        return result.depends is not None
+
+    return sign.replace(
+        parameters=[_update_param(param) for param in sign.parameters.values() if _is_depends(param)],
+    )
 
 
 def strip_deps_from_sign(

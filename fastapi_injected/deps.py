@@ -129,6 +129,9 @@ async def solve_dependencies(
 
     scope.dependency_cache.update(solved.dependency_cache)
 
+    if solved.errors:
+        raise ValueError(solved.errors)
+
     if single:
         try:
             return solved.values["__value__"]
