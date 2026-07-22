@@ -1,5 +1,6 @@
 import inspect
 from collections.abc import Callable
+from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from copy import copy
 from functools import lru_cache, wraps
@@ -9,45 +10,10 @@ from fastapi import Depends
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature
 from fastapi.dependencies.utils import solve_dependencies as _solve_dependencies
-from starlette.requests import Request
-from starlette.types import Message, Scope
 
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
 from .types import Coro, HasSignature
-
-
-def _dummy_scope() -> Scope:
-    return {
-        "type": "http",
-        "http_version": "1.1",
-        "query_string": b"",
-        "headers": [],
-    }
-
-
-def _dummy_request(
-    *,
-    extra_scope: Scope | None = None,
-) -> Request:
-    async def _dummy_receive() -> Message:
-        return {
-            "type": "http.request",
-            "body": b"",
-        }
-
-    async def _dummy_send(_: Message, /) -> None:
-        pass
-
-    scope = _dummy_scope()
-    if extra_scope:
-        scope.update(extra_scope)
-
-    return Request(
-        scope,
-        receive=_dummy_receive,
-        send=_dummy_send,
-    )
 
 
 @lru_cache(maxsize=1024)
@@ -114,16 +80,12 @@ async def solve_dependencies(
     single: bool = False,
 ) -> dict[str, Any]:
     solved = await _solve_dependencies(
-        request=_dummy_request(
-            extra_scope={
-                "fastapi_inner_astack": scope.request_astack,
-                "fastapi_function_astack": scope.func_astack,
-            },
-        ),
+        request=scope.request,
         dependant=dependant,
-        async_exit_stack=scope.request_astack,
         dependency_cache=copy(scope.dependency_cache),
         dependency_overrides_provider=_dependency_override_provider.get(),
+        # this parameter is deprecated and not used
+        async_exit_stack=cast(AsyncExitStack, None),
         embed_body_fields=False,
     )
 

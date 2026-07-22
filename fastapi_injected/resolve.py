@@ -4,7 +4,7 @@ from .deps import create_single_dependant, solve_dependencies
 from .scope import inside_inject_scope
 
 
-async def solve[R](
+async def resolve[R](
     tp: TypeForm[R],
     *,
     new_scope: bool = False,
@@ -22,5 +22,5 @@ async def solve[R](
 
 
 __all__ = [
-    "solve",
+    "resolve",
 ]

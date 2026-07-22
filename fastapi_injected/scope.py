@@ -1,22 +1,54 @@
 from collections.abc import AsyncIterator
 from contextlib import (
-    AbstractAsyncContextManager,
     AsyncExitStack,
     asynccontextmanager,
-    nullcontext,
 )
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+
+from fastapi import Request
+from starlette.types import Message, Scope
 
 from .types import DependencyCache
+
+
+def _dummy_scope() -> Scope:
+    return {
+        "type": "http",
+        "http_version": "1.1",
+        "query_string": b"",
+        "headers": [],
+    }
+
+
+def _dummy_request(
+    *,
+    extra_scope: Scope | None = None,
+) -> Request:
+    async def _dummy_receive() -> Message:
+        return {
+            "type": "http.request",
+            "body": b"",
+        }
+
+    async def _dummy_send(_: Message, /) -> None:
+        pass
+
+    scope = _dummy_scope()
+    if extra_scope:
+        scope.update(extra_scope)
+
+    return Request(
+        scope,
+        receive=_dummy_receive,
+        send=_dummy_send,
+    )
 
 
 @dataclass
 class InjectScope:
     dependency_cache: DependencyCache
-    func_astack: AsyncExitStack
-    request_astack: AsyncExitStack
+    request: Request
 
 
 _inject_scope: ContextVar[InjectScope | None] = ContextVar(
@@ -27,14 +59,22 @@ _inject_scope: ContextVar[InjectScope | None] = ContextVar(
 
 @asynccontextmanager
 async def push_inject_scope(
+    *,
     dependency_cache: DependencyCache | None = None,
+    request: Request | None = None,
 ) -> AsyncIterator[InjectScope]:
+    if dependency_cache is None:
+        dependency_cache = {}
+
     async with AsyncExitStack() as stack:
-        scope = InjectScope(
-            dependency_cache or {},
-            stack,
-            stack,
+        request = request or _dummy_request(
+            extra_scope={
+                "fastapi_inner_astack": stack,
+                "fastapi_function_astack": stack,
+            },
         )
+
+        scope = InjectScope(dependency_cache, request)
         token = _inject_scope.set(scope)
 
         try:
@@ -54,17 +94,10 @@ async def inside_inject_scope(
 ) -> AsyncIterator[InjectScope]:
     scope = current_inject_scope()
 
-    _ctx: AbstractAsyncContextManager[Any]
+    async with AsyncExitStack() as stack:
+        if scope is None or new_scope:
+            scope = await stack.enter_async_context(push_inject_scope())
 
-    if scope is None or new_scope:
-        stack = AsyncExitStack()
-        scope = await stack.enter_async_context(push_inject_scope())
-
-        _ctx = stack
-    else:
-        _ctx = nullcontext()
-
-    async with _ctx:
         yield scope
 
 

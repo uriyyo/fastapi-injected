@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from fastapi_injected import Dep, DepFactory, Injected, inject, solve
+from fastapi_injected import Dep, DepFactory, Injected, inject, resolve
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -22,8 +22,8 @@ async def func(
     return a + 10
 
 
-async def solve_test() -> None:
-    container = await solve(Container)
+async def resolve_test() -> None:
+    container = await resolve(Container)
 
     static_assert(is_equivalent_to(TypeOf[container], Container))
 
