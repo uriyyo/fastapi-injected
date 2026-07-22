@@ -1,6 +1,6 @@
 import pytest
 
-from fastapi_injected import Dep, Inejected, inject, push_inject_scope
+from fastapi_injected import Dep, Injected, inject, push_inject_scope
 
 from .deps import Child, Container, ContextState
 
@@ -12,7 +12,7 @@ async def test_inject():
     @inject
     async def func(
         *,
-        bar: Dep[Container] = Inejected,
+        bar: Dep[Container] = Injected,
     ) -> None:
         assert isinstance(bar, Container)
         assert isinstance(bar.child, Child)
@@ -25,7 +25,7 @@ async def test_inject_reuse_cache():
     @inject
     async def func(
         *,
-        bar: Dep[Container] = Inejected,
+        bar: Dep[Container] = Injected,
     ) -> Container:
         return bar
 
@@ -40,7 +40,7 @@ async def test_inject_new_scope_use_different_cache():
     @inject(new_scope=True)
     async def func(
         *,
-        bar: Dep[Container] = Inejected,
+        bar: Dep[Container] = Injected,
     ) -> Container:
         return bar
 
@@ -57,7 +57,7 @@ async def test_inject_func_with_args():
         a: int,
         b: int,
         *,
-        bar: Dep[Container] = Inejected,
+        bar: Dep[Container] = Injected,
     ) -> int:
         assert isinstance(bar, Container)
         assert isinstance(bar.child, Child)
@@ -73,7 +73,7 @@ async def test_inject_teardown():
     @inject
     async def func(
         *,
-        bar: Dep[Container] = Inejected,
+        bar: Dep[Container] = Injected,
     ) -> ContextState:
         assert not bar.ctx.closed
         return bar.ctx
@@ -86,7 +86,7 @@ async def test_inject_teardown_in_scope():
     @inject
     async def func(
         *,
-        bar: Dep[Container] = Inejected,
+        bar: Dep[Container] = Injected,
     ) -> ContextState:
         assert not bar.ctx.closed
         return bar.ctx

@@ -7,9 +7,9 @@ from fastapi.types import DependencyCacheKey
 from typing_extensions import sentinel
 
 if TYPE_CHECKING:
-    Inejected: Any = object()
+    Injected: Any = object()
 else:
-    Inejected = sentinel("Injected")
+    Injected = sentinel("Injected")
 
 if TYPE_CHECKING:
     type Dep[T] = Annotated[T, Depends()]
@@ -58,5 +58,5 @@ __all__ = [
     "DependencyCache",
     "Func",
     "HasSignature",
-    "Inejected",
+    "Injected",
 ]

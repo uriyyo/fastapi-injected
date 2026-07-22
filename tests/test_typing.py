@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from fastapi_injected import Dep, DepFactory, Inejected, inject, solve
+from fastapi_injected import Dep, DepFactory, Injected, inject, solve
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 async def func(
     a: int,
     *,
-    container: Dep[Container] = Inejected,
+    container: Dep[Container] = Injected,
 ) -> int:
     static_assert(is_equivalent_to(TypeOf[container], Container))
     static_assert(is_equivalent_to(TypeOf[container.child], Child))

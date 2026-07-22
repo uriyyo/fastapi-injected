@@ -4,7 +4,7 @@ from typing import cast
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import analyze_param
 
-from .types import Decorator, Func, HasSignature, Inejected
+from .types import Decorator, Func, HasSignature, Injected
 
 
 def update_func_sign[**P, R](func: Func[P, R], sign: inspect.Signature) -> Func[P, R]:
@@ -14,7 +14,7 @@ def update_func_sign[**P, R](func: Func[P, R], sign: inspect.Signature) -> Func[
 
 def prepare_sign(sign: inspect.Signature) -> inspect.Signature:
     def _update_param(param: inspect.Parameter) -> inspect.Parameter:
-        if param.default is Inejected:
+        if param.default is Injected:
             param = param.replace(default=inspect.Parameter.empty)
 
         return param
