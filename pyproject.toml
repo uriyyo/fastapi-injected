@@ -1,0 +1,31 @@
+[project]
+name = "fastapi-injected"
+version = "0.1.0"
+description = "Yet another library to reuse fastapi dependency injection"
+authors = [
+    { name = "Yurii Karabas", email = "1998uriyyo@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "fastapi>=0.139.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.22",
+    "ty>=0.0.62",
+    "pre-commit>=4.6.1",
+]
