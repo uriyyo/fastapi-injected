@@ -7,7 +7,7 @@ from .types import Decorator, Func, HasSignature, Inejected
 
 
 def update_func_sign[**P, R](func: Func[P, R], sign: inspect.Signature) -> Func[P, R]:
-    cast(HasSignature, func).__signature__ = sign
+    cast("HasSignature", func).__signature__ = sign
     return func
 
 
@@ -18,9 +18,7 @@ def prepare_sign(sign: inspect.Signature) -> inspect.Signature:
 
         return param
 
-    return sign.replace(
-        parameters=[_update_param(param) for param in sign.parameters.values()]
-    )
+    return sign.replace(parameters=[_update_param(param) for param in sign.parameters.values()])
 
 
 def strip_deps_from_sign(
@@ -29,28 +27,22 @@ def strip_deps_from_sign(
 ) -> inspect.Signature:
     names = {param.name for param in dependent.dependencies}
 
-    return sign.replace(
-        parameters=[
-            param for param in sign.parameters.values() if param.name not in names
-        ]
-    )
+    return sign.replace(parameters=[param for param in sign.parameters.values() if param.name not in names])
 
 
 def strip_sign[**P, R](dependant: Dependant, /) -> Decorator[P, R]:
     def decorator(func: Func[P, R]) -> Func[P, R]:
-        func = update_func_sign(
+        return update_func_sign(
             func,
             strip_deps_from_sign(inspect.signature(func), dependant),
         )
-
-        return func
 
     return decorator
 
 
 __all__ = [
+    "prepare_sign",
     "strip_deps_from_sign",
     "strip_sign",
-    "prepare_sign",
     "update_func_sign",
 ]

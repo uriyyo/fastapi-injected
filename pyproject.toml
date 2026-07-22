@@ -29,3 +29,63 @@ dev = [
     "ty>=0.0.62",
     "pre-commit>=4.6.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/uriyyo/fastapi-injected"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "ALL",  # select all checks by default
+]
+ignore = [
+    # single rule exclude
+    "S101",    # allow assert usage
+    "PLR2004", # allow to compare with "magic numbers"
+    "TRY003",  # allow message in exception class
+
+    # full rule exclude
+    "D",   # ignore docstrings
+    "FA",  # ignore future annotations
+    "ANN", # ignore annotations
+    "FIX", # ignore FIXMEs
+    "TD",  # ignore all TODOs
+    "ARG", # ignore unused arguments
+    "FBT", # ignore flake8-boolean-trap
+    "EM",  # ignore error message formatting
+    "TC",  # ignore type checking
+]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    ".venv",
+]
+per-file-ignores = { }
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10

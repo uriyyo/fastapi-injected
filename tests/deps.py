@@ -1,5 +1,5 @@
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import AsyncIterator
 
 from fastapi_injected import Dep, DepFactory
 
@@ -29,8 +29,8 @@ class Container:
 
 
 __all__ = [
+    "Child",
     "Container",
     "ContextState",
-    "Child",
     "ctx_dep",
 ]

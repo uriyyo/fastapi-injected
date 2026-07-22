@@ -1,8 +1,9 @@
 import inspect
+from collections.abc import Callable
 from contextvars import ContextVar
 from copy import copy
 from functools import lru_cache, wraps
-from typing import Annotated, Any, Callable, Literal, cast, overload
+from typing import Annotated, Any, Literal, cast, overload
 
 from fastapi import Depends
 from fastapi.dependencies.models import Dependant
@@ -71,7 +72,7 @@ def create_single_dependant[**P, R](func: Callable[P, R], /) -> Dependant:
     async def _factory(__value__: R) -> R:
         return __value__
 
-    cast(HasSignature, _factory).__signature__ = inspect.Signature(
+    cast("HasSignature", _factory).__signature__ = inspect.Signature(
         parameters=[
             inspect.Parameter(
                 "__value__",
@@ -117,7 +118,7 @@ async def solve_dependencies(
             extra_scope={
                 "fastapi_inner_astack": scope.request_astack,
                 "fastapi_function_astack": scope.func_astack,
-            }
+            },
         ),
         dependant=dependant,
         async_exit_stack=scope.request_astack,
@@ -132,7 +133,7 @@ async def solve_dependencies(
         try:
             return solved.values["__value__"]
         except KeyError:
-            raise ValueError("No single dependency found")
+            raise ValueError("No single dependency found") from None
 
     return solved.values
 
@@ -148,7 +149,7 @@ def set_inject_dependency_override_provider(provider: Any, /) -> None:
 
 
 __all__ = [
-    "set_inject_dependency_override_provider",
     "create_dependant",
+    "set_inject_dependency_override_provider",
     "solve_dependencies",
 ]

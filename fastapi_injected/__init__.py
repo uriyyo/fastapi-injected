@@ -4,10 +4,10 @@ from .solve import solve
 from .types import Dep, DepFactory, Inejected
 
 __all__ = [
+    "Dep",
+    "DepFactory",
+    "Inejected",
     "inject",
     "push_inject_scope",
     "solve",
-    "Dep",
-    "Inejected",
-    "DepFactory",
 ]

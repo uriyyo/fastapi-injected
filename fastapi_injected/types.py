@@ -1,5 +1,6 @@
 import inspect
-from typing import TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Protocol, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
 
 from fastapi import Depends
 from fastapi.types import DependencyCacheKey
@@ -49,13 +50,13 @@ class HasSignature(Protocol):
 
 
 __all__ = [
-    "Coro",
     "AsyncFunc",
-    "Func",
+    "Coro",
     "Decorator",
-    "DependencyCache",
-    "HasSignature",
     "Dep",
     "DepFactory",
+    "DependencyCache",
+    "Func",
+    "HasSignature",
     "Inejected",
 ]
