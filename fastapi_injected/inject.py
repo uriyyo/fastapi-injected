@@ -34,8 +34,8 @@ def inject[**P, R](
 
     dependant = create_dependant(func)
 
-    @wraps(func)
     @strip_sign(dependant)
+    @wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         async with inside_inject_scope(
             new_scope=new_scope,
