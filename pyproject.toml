@@ -1,6 +1,6 @@
 [project]
 name = "fastapi-injected"
-version = "0.1.3"
+version = "0.1.4"
 description = "Yet another library to reuse fastapi dependency injection"
 authors = [
     { name = "Yurii Karabas", email = "1998uriyyo@gmail.com" },
@@ -19,6 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.139.2",
+    "typing-extensions>=4.16.0",
 ]
 
 [dependency-groups]

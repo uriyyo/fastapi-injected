@@ -8,8 +8,7 @@ from typing import Annotated, Any, Literal, cast, overload
 
 from fastapi import Depends
 from fastapi.dependencies.models import Dependant
-from fastapi.dependencies.utils import get_dependant, get_typed_signature
-from fastapi.dependencies.utils import solve_dependencies as _solve_dependencies
+from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
@@ -56,7 +55,7 @@ def create_single_dependant[**P, R](func: Callable[P, R], /) -> Dependant:
 
 
 @overload
-async def solve_dependencies(
+async def resolve_dependencies(
     dependant: Dependant,
     scope: InjectScope,
     *,
@@ -65,7 +64,7 @@ async def solve_dependencies(
 
 
 @overload
-async def solve_dependencies(
+async def resolve_dependencies(
     dependant: Dependant,
     scope: InjectScope,
     *,
@@ -73,13 +72,13 @@ async def solve_dependencies(
 ) -> Any: ...
 
 
-async def solve_dependencies(
+async def resolve_dependencies(
     dependant: Dependant,
     scope: InjectScope,
     *,
     single: bool = False,
 ) -> dict[str, Any]:
-    solved = await _solve_dependencies(
+    solved = await solve_dependencies(
         request=scope.request,
         dependant=dependant,
         dependency_cache=copy(scope.dependency_cache),
@@ -115,6 +114,6 @@ def set_inject_dependency_override_provider(provider: Any, /) -> None:
 
 __all__ = [
     "create_dependant",
+    "resolve_dependencies",
     "set_inject_dependency_override_provider",
-    "solve_dependencies",
 ]

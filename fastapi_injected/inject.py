@@ -1,7 +1,7 @@
 from functools import partial, wraps
 from typing import overload
 
-from .deps import create_dependant, solve_dependencies
+from .deps import create_dependant, resolve_dependencies
 from .scope import inside_inject_scope
 from .sign import strip_sign
 from .types import AsyncFunc, Decorator
@@ -40,7 +40,7 @@ def inject[**P, R](
         async with inside_inject_scope(
             new_scope=new_scope,
         ) as inject_scope:
-            solved = await solve_dependencies(dependant, inject_scope)
+            solved = await resolve_dependencies(dependant, inject_scope)
 
             for key, value in solved.items():
                 kwargs.setdefault(key, value)

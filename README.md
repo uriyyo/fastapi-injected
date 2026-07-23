@@ -20,7 +20,7 @@ Declare dependencies as regular classes and annotate fields with `Dep[...]`:
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from fastapi_injected import Dep, DepFactory, Inejected, inject
+from fastapi_injected import Dep, DepFactory, Injected, inject
 
 
 @dataclass
@@ -47,7 +47,7 @@ class Service:
 
 
 @inject
-async def handler(*, service: Dep[Service] = Inejected) -> None:
+async def handler(*, service: Dep[Service] = Injected) -> None:
     ...  # service is built and injected, session is closed on exit
 
 
@@ -56,28 +56,30 @@ await handler()
 
 - `Dep[T]` — resolve `T` by calling it, same as FastAPI's `Annotated[T, Depends()]`.
 - `DepFactory[T, factory]` — resolve `T` via a factory, same as `Annotated[T, Depends(factory)]`. Generator factories get proper teardown.
-- `Inejected` — a sentinel default that exists purely to make type checkers happy: without it they would complain about a missing argument at call sites. At runtime the parameter is always filled in by `@inject`.
+- `Injected` — a sentinel default that exists purely to make type checkers happy: without it they would complain about a missing argument at call sites. At runtime the parameter is always filled in by `@inject`.
 
 Injected parameters mix freely with regular ones — pass your own arguments as usual and the rest is injected:
 
 ```python
 @inject
-async def add(a: int, b: int, *, service: Dep[Service] = Inejected) -> int:
+async def add(a: int, b: int, *, service: Dep[Service] = Injected) -> int:
     ...
 
 
 result = await add(1, 2)
 ```
 
-### Solving a type directly
+### Resolving a type directly
 
 No decorator needed — resolve a dependency graph on demand:
 
 ```python
-from fastapi_injected import solve
+from fastapi_injected import resolve
 
-service = await solve(Service)
+service = await resolve(Service)
 ```
+
+Like `@inject`, `resolve` accepts `new_scope=True` to force a fresh scope instead of reusing the surrounding one.
 
 ### Scopes and caching
 
@@ -93,6 +95,25 @@ async with push_inject_scope():
 ```
 
 Use `@inject(new_scope=True)` to opt a function out of the surrounding scope and always get fresh dependencies.
+
+### FastAPI request integration
+
+Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Register `init_inject_scope` as a dependency:
+
+```python
+from fastapi import Depends, FastAPI
+from fastapi_injected import Dep, init_inject_scope, resolve
+
+app = FastAPI(dependencies=[Depends(init_inject_scope)])
+
+
+@app.get("/")
+async def route(service: Dep[Service]) -> str:
+    same = await resolve(Service)  # same instance as `service`
+    ...
+```
+
+Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request.
 
 ## License
 
