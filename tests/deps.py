@@ -28,9 +28,19 @@ class Container:
     ctx: DepFactory[ContextState, ctx_dep]
 
 
+def get_value() -> int:
+    return 1
+
+
+@dataclass
+class State:
+    value: DepFactory[int, get_value]
+
+
 __all__ = [
     "Child",
     "Container",
     "ContextState",
+    "State",
     "ctx_dep",
 ]

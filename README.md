@@ -96,6 +96,61 @@ async with push_inject_scope():
 
 Use `@inject(new_scope=True)` to opt a function out of the surrounding scope and always get fresh dependencies.
 
+### Overriding dependencies
+
+`push_overrides` swaps dependencies out for the duration of a `with` block — handy in tests, or anywhere you need to run the same code against a different implementation:
+
+```python
+from fastapi_injected import push_overrides
+
+with push_overrides({Session: Session(closed=True)}):
+    await handler()  # gets the override instead of the real dependency
+```
+
+A key can be the dependency itself, or the annotation you wrote in the signature — `Dep[Session]` and `DepFactory[Session, session_dep]` both work and are normalized to the same underlying dependency:
+
+```python
+with push_overrides({DepFactory[Session, session_dep]: my_session}):
+    ...
+```
+
+Values are used as-is, but two wrappers make the intent explicit and cover the ambiguous cases:
+
+- `ValueOverride(value)` — always inject `value`, even when it is itself callable.
+- `FactoryOverride(factory)` — call `factory` to produce the value. Sync, async, and generator factories are all supported, with the same teardown semantics as regular dependencies.
+
+```python
+from fastapi_injected import FactoryOverride, ValueOverride
+
+with push_overrides(
+    {
+        Session: ValueOverride(fake_session),
+        Repository: FactoryOverride(lambda: FakeRepository()),
+    },
+):
+    ...
+```
+
+Overrides apply to the whole graph, not just top-level parameters — overriding a nested dependency changes what its dependents receive. Nested `push_overrides` blocks merge, with the innermost one winning.
+
+Because the surrounding scope caches resolved dependencies, an override pushed after something has already been built would silently have no effect. To catch that, `push_overrides` raises `NonFreshScopeError` if the current scope already holds cached dependencies. Pass `require_fresh_scope=False` if you know what you are doing and want the override to apply only to what has not been resolved yet:
+
+```python
+async with push_inject_scope():
+    await handler()  # dependencies cached here
+
+    with push_overrides({Session: fake}):  # raises NonFreshScopeError
+        ...
+```
+
+### Inspecting annotations
+
+A few helpers are exported for code that needs to reason about `Dep[...]` annotations — building override maps, custom decorators, and the like:
+
+- `is_dep(tp)` — whether `tp` is a `Dep`/`DepFactory` annotation.
+- `unwrap_dep_tp(tp)` — the annotated type (`Any` for a bare `Dep`).
+- `unwrap_dep_dependency(tp)` — the callable that resolves it: the factory for `DepFactory[T, factory]`, the type itself for `Dep[T]`.
+
 ### FastAPI request integration
 
 Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Register `init_inject_scope` as a dependency:

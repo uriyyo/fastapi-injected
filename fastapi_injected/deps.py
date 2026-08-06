@@ -1,7 +1,7 @@
 import inspect
-from collections.abc import Callable
-from contextlib import AsyncExitStack
-from contextvars import ContextVar
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, AsyncExitStack, contextmanager
+from contextvars import ContextVar, Token
 from copy import copy
 from functools import lru_cache, wraps
 from typing import Annotated, Any, Literal, cast, overload
@@ -108,12 +108,27 @@ _dependency_override_provider: ContextVar[Any] = ContextVar(
 )
 
 
-def set_inject_dependency_override_provider(provider: Any, /) -> None:
-    _dependency_override_provider.set(provider)
+@contextmanager
+def _reset_token(var: ContextVar[Any], token: Token[Any]) -> Iterator[None]:
+    try:
+        yield
+    finally:
+        var.reset(token)
+
+
+def set_inject_dependency_override_provider(provider: Any, /) -> AbstractContextManager[None]:
+    token = _dependency_override_provider.set(provider)
+
+    return _reset_token(_dependency_override_provider, token)
+
+
+def get_inject_dependency_override_provider() -> Any | None:
+    return _dependency_override_provider.get()
 
 
 __all__ = [
     "create_dependant",
+    "get_inject_dependency_override_provider",
     "resolve_dependencies",
     "set_inject_dependency_override_provider",
 ]

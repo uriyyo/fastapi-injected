@@ -1,6 +1,6 @@
 [project]
 name = "fastapi-injected"
-version = "0.1.4"
+version = "0.2.0"
 description = "Yet another library to reuse fastapi dependency injection"
 authors = [
     { name = "Yurii Karabas", email = "1998uriyyo@gmail.com" },
@@ -65,6 +65,7 @@ ignore = [
     "FBT", # ignore flake8-boolean-trap
     "EM",  # ignore error message formatting
     "TC",  # ignore type checking
+    "CPY", # ignore copyright
 ]
 exclude = [
     ".bzr",

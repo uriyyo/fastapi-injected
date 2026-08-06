@@ -1,6 +1,6 @@
 import inspect
-from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
+from collections.abc import Callable, Coroutine, Mapping
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, runtime_checkable
 
 from fastapi import Depends
 from fastapi.types import DependencyCacheKey
@@ -49,6 +49,11 @@ class HasSignature(Protocol):
     __signature__: inspect.Signature
 
 
+@runtime_checkable
+class HasDependencyOverrides(Protocol):
+    dependency_overrides: Mapping[Any, Any]
+
+
 __all__ = [
     "AsyncFunc",
     "Coro",
@@ -57,6 +62,7 @@ __all__ = [
     "DepFactory",
     "DependencyCache",
     "Func",
+    "HasDependencyOverrides",
     "HasSignature",
     "Injected",
 ]
