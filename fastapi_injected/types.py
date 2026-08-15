@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, runtime_checkable
 
 from fastapi import Depends
@@ -54,12 +54,15 @@ class HasDependencyOverrides(Protocol):
     dependency_overrides: Mapping[Any, Any]
 
 
+type DepReturn[R] = Coro[R] | Iterator[R] | AsyncIterator[R] | R
+
 __all__ = [
     "AsyncFunc",
     "Coro",
     "Decorator",
     "Dep",
     "DepFactory",
+    "DepReturn",
     "DependencyCache",
     "Func",
     "HasDependencyOverrides",

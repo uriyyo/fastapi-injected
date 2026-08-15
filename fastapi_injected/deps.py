@@ -4,15 +4,24 @@ from contextlib import AbstractContextManager, AsyncExitStack, contextmanager
 from contextvars import ContextVar, Token
 from copy import copy
 from functools import lru_cache, wraps
-from typing import Annotated, Any, Literal, cast, overload
+from typing import Annotated, Any, Literal, Protocol, cast, overload, runtime_checkable
 
-from fastapi import Depends
+from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
 from .types import Coro, HasSignature
+
+
+@runtime_checkable
+class HasDependsHook[**P, R](Protocol):
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Any:
+        pass
+
+    def __get_depends__(self) -> params.Depends:
+        pass
 
 
 @lru_cache(maxsize=1024)
@@ -33,16 +42,25 @@ def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
 
 
 @lru_cache(maxsize=1024)
-def create_single_dependant[**P, R](func: Callable[P, R], /) -> Dependant:
+def create_single_dependant[**P, R](
+    func: Callable[P, R] | HasDependsHook[P, R],
+    /,
+) -> Dependant:
     async def _factory(__value__: R) -> R:
         return __value__
+
+    match func:
+        case HasDependsHook():
+            depends = func.__get_depends__()
+        case _:
+            depends = Depends(func)
 
     cast("HasSignature", _factory).__signature__ = inspect.Signature(
         parameters=[
             inspect.Parameter(
                 "__value__",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=Annotated[Any, Depends(func)],
+                annotation=Annotated[Any, depends],
             ),
         ],
         return_annotation=Any,

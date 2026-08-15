@@ -1,14 +1,40 @@
+from collections.abc import Callable
+from typing import Any, overload
+
 from typing_extensions import TypeForm
 
-from .deps import create_single_dependant, resolve_dependencies
+from fastapi_injected.types import DepReturn
+
+from .deps import HasDependsHook, create_single_dependant, resolve_dependencies
 from .scope import inside_inject_scope
 
 
-async def resolve[R](
-    tp: TypeForm[R],
+@overload
+async def resolve[**P, R](
+    tp: Callable[P, DepReturn[R]] | HasDependsHook[P, DepReturn[R]],
+    /,
     *,
     new_scope: bool = False,
 ) -> R:
+    pass
+
+
+@overload
+async def resolve[R](
+    tp: TypeForm[R],
+    /,
+    *,
+    new_scope: bool = False,
+) -> R:
+    pass
+
+
+async def resolve(
+    tp: Any,
+    /,
+    *,
+    new_scope: bool = False,
+) -> Any:
     dependant = create_single_dependant(tp)
 
     async with inside_inject_scope(
