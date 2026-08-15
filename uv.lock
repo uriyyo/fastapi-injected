@@ -191,6 +191,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "typing-extensions" },
+    { name = "typing-inspection" },
 ]
 
 [package.dev-dependencies]
@@ -209,6 +210,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.139.2" },
     { name = "typing-extensions", specifier = ">=4.16.0" },
+    { name = "typing-inspection", specifier = ">=0.4.4" },
 ]
 
 [package.metadata.requires-dev]

@@ -1,11 +1,13 @@
-from typing import Annotated, Any, TypeAliasType, TypeVar, get_args, get_origin
+from typing import Annotated, Any, TypeVar, get_args, get_origin
 
 from fastapi.params import Depends
+from typing_inspection.typing_objects import is_typealiastype
 
 
-def _unwrap_tp(tp: Any) -> Any:
-    if isinstance(tp, TypeAliasType):
-        return tp.__value__
+def unwrap_tp(tp: Any) -> Any:
+    # PEP 695 aliases can be nested, e.g. `type A = B` where `type B = Annotated[...]`
+    while is_typealiastype(tp):
+        tp = tp.__value__
 
     return tp
 
@@ -18,13 +20,13 @@ def _get_annotated_metadata(tp: Any) -> tuple[Any, ...]:
 
 
 def is_dep(tp: Any) -> bool:
-    tp = _unwrap_tp(tp)
+    tp = unwrap_tp(tp)
 
     return any(isinstance(tp, Depends) for tp in _get_annotated_metadata(tp))
 
 
 def _enforce_dep(tp: Any) -> Any:
-    tp = _unwrap_tp(tp)
+    tp = unwrap_tp(tp)
 
     if not is_dep(tp):
         msg = f"Expected a Dep, got {tp!r}"
@@ -57,4 +59,5 @@ __all__ = [
     "is_dep",
     "unwrap_dep_dependency",
     "unwrap_dep_tp",
+    "unwrap_tp",
 ]

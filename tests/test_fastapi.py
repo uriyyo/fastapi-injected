@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import Depends, FastAPI, status
 from fastapi.testclient import TestClient
 
@@ -40,10 +42,12 @@ async def _item_id_dep(item_id: int) -> int:
     return item_id
 
 
+type ItemID = Annotated[int, Depends(_item_id_dep)]
+
+
 @app.get("/items/{item_id}")
-async def item_route(item_id: int) -> int:
-    # the route path is known to `resolve`, so `item_id` is solved as a path param
-    assert await resolve(_item_id_dep) == item_id
+async def item_route(item_id: ItemID) -> int:
+    assert await resolve(ItemID) == item_id
 
     return item_id
 

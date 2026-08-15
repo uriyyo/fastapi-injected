@@ -10,6 +10,7 @@ from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 
+from ._deps_tp import is_dep, unwrap_tp
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
 from .types import Coro, HasSignature
@@ -52,17 +53,19 @@ def create_single_dependant[**P, R](
         return __value__
 
     match func:
+        case _ if is_dep(func):
+            annotation = unwrap_tp(func)
         case HasDependsHook():
-            depends = func.__get_depends__()
+            annotation = Annotated[Any, func.__get_depends__()]
         case _:
-            depends = Depends(func)
+            annotation = Annotated[Any, Depends(func)]
 
     cast("HasSignature", _factory).__signature__ = inspect.Signature(
         parameters=[
             inspect.Parameter(
                 "__value__",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=Annotated[Any, depends],
+                annotation=annotation,
             ),
         ],
         return_annotation=Any,
