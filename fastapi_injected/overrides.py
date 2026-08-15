@@ -15,8 +15,9 @@ class NonFreshScopeError(Exception):
         super().__init__("push_overrides requires a fresh scope")
 
 
-def _get_current_overrides() -> Iterator[Mapping[Any, Any]]:
-    obj = get_inject_dependency_override_provider()
+def _get_overrides(obj: Any | None, /) -> Iterator[Mapping[Any, Any]]:
+    if obj is None:
+        return
 
     if isinstance(obj, HasDependencyOverrides):
         yield obj.dependency_overrides
@@ -33,7 +34,7 @@ def _get_override_key(tp: Any) -> Any:
 
 
 @dataclass
-class _OverridesProvider:
+class OverridesProvider:
     dependency_overrides: Mapping[Any, Any]
 
 
@@ -77,30 +78,45 @@ def _enforce_fresh_scope() -> None:
         raise NonFreshScopeError
 
 
+def create_fallback_override_provider(
+    *,
+    overrides: Overrides | None = None,
+    provider: HasDependencyOverrides | None = None,
+) -> OverridesProvider:
+    return OverridesProvider(
+        ChainMap(
+            {_get_override_key(k): _create_resolver(v) for k, v in (overrides or {}).items()},
+            *_get_overrides(provider),  # type: ignore[ty:invalid-argument-type]
+            *_get_overrides(get_inject_dependency_override_provider()),  # type: ignore[ty:invalid-argument-type]
+        ),
+    )
+
+
 @contextmanager
 def push_overrides(
-    overrides: Overrides,
+    overrides: Overrides | None = None,
     /,
     *,
+    provider: HasDependencyOverrides | None = None,
     require_fresh_scope: bool = True,
 ) -> Iterator[None]:
 
     if require_fresh_scope:
         _enforce_fresh_scope()
 
-    deps = ChainMap(
-        {_get_override_key(k): _create_resolver(v) for k, v in overrides.items()},
-        *_get_current_overrides(),  # type: ignore[ty:invalid-argument-type]
-    )
-
     with set_inject_dependency_override_provider(
-        _OverridesProvider(deps),
+        create_fallback_override_provider(
+            overrides=overrides,
+            provider=provider,
+        ),
     ):
         yield
 
 
 __all__ = [
     "FactoryOverride",
+    "OverridesProvider",
     "ValueOverride",
+    "create_fallback_override_provider",
     "push_overrides",
 ]

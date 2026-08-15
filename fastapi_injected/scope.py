@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from fastapi import Request
+from fastapi.routing import APIRoute, APIWebSocketRoute
 from starlette.types import Message, Scope
 
 from .types import DependencyCache
@@ -49,6 +50,14 @@ def _dummy_request(
 class InjectScope:
     dependency_cache: DependencyCache
     request: Request
+
+    @property
+    def path_format(self) -> str | None:
+        match self.request.scope:
+            case {"route": APIRoute() | APIWebSocketRoute() as route}:
+                return route.path_format
+            case _:
+                return None
 
 
 _inject_scope: ContextVar[InjectScope | None] = ContextVar(

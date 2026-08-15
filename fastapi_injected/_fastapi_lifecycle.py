@@ -1,10 +1,11 @@
-from collections.abc import AsyncIterable
+from collections.abc import AsyncGenerator
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
-from fastapi import Request, WebSocket, routing
+from fastapi import Depends, FastAPI, Request, WebSocket, routing
 from fastapi.dependencies import utils
 
+from .overrides import push_overrides
 from .scope import push_inject_scope
 from .types import DependencyCache
 
@@ -49,14 +50,27 @@ def _get_dependency_cache(request: Request) -> DependencyCache:
         raise MissingDependencyCacheError("Dependency cache not found") from None
 
 
-async def init_inject_scope(request: Request) -> AsyncIterable[None]:
-    async with push_inject_scope(
-        dependency_cache=_get_dependency_cache(request),
-        request=request,
-    ):
-        yield
+async def init_inject_scope(request: Request) -> AsyncGenerator[None]:
+    with push_overrides(provider=request.scope["route"].dependency_overrides_provider):
+        async with push_inject_scope(
+            dependency_cache=_get_dependency_cache(request),
+            request=request,
+        ):
+            yield
+
+
+def add_injected_scope(
+    app: FastAPI,
+    /,
+) -> None:
+    if any(dep.dependency is init_inject_scope for dep in app.router.dependencies):
+        return
+
+    dependency = Depends(init_inject_scope)
+    app.router.dependencies.insert(0, dependency)
 
 
 __all__ = [
+    "add_injected_scope",
     "init_inject_scope",
 ]

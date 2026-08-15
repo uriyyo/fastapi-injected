@@ -45,6 +45,8 @@ def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
 def create_single_dependant[**P, R](
     func: Callable[P, R] | HasDependsHook[P, R],
     /,
+    *,
+    path: str | None = None,
 ) -> Dependant:
     async def _factory(__value__: R) -> R:
         return __value__
@@ -67,7 +69,7 @@ def create_single_dependant[**P, R](
     )
 
     return get_dependant(
-        path="",
+        path=path or "",
         call=_factory,
     )
 
@@ -100,7 +102,7 @@ async def resolve_dependencies(
         request=scope.request,
         dependant=dependant,
         dependency_cache=copy(scope.dependency_cache),
-        dependency_overrides_provider=_dependency_override_provider.get(),
+        dependency_overrides_provider=get_inject_dependency_override_provider(),
         # this parameter is deprecated and not used
         async_exit_stack=cast(AsyncExitStack, None),
         embed_body_fields=False,

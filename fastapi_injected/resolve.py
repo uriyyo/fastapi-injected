@@ -35,11 +35,15 @@ async def resolve(
     *,
     new_scope: bool = False,
 ) -> Any:
-    dependant = create_single_dependant(tp)
 
     async with inside_inject_scope(
         new_scope=new_scope,
     ) as inject_scope:
+        dependant = create_single_dependant(
+            tp,
+            path=inject_scope.path_format,
+        )
+
         return await resolve_dependencies(
             dependant,
             inject_scope,
