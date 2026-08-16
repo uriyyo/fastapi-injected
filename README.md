@@ -136,6 +136,8 @@ async with push_inject_scope(app=app):
 
 Without it, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
 
+Analysing a dependency is the expensive part of resolving one, so the result is cached — keyed by the dependency itself, not by whatever object carried it, so nothing that only passed through is kept alive. `clear_dependant_cache()` drops it, for long-lived processes and test suites that want the memory back.
+
 ### Overriding dependencies
 
 `push_overrides` swaps dependencies out for the duration of a `with` block — handy in tests, or anywhere you need to run the same code against a different implementation:

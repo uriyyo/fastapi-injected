@@ -39,7 +39,6 @@ class HasDependsHook[**P, R](Protocol):
         pass
 
 
-@lru_cache(maxsize=1024)
 def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
     @wraps(func)
     async def __call(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -56,16 +55,12 @@ def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
     )
 
 
-@lru_cache(maxsize=1024)
 def create_single_dependant[**P, R](
     func: Callable[P, R] | HasDependsHook[P, R],
     /,
     *,
     path: str | None = None,
 ) -> Dependant:
-    async def _factory(__value__: R) -> R:
-        return __value__
-
     match func:
         case _ if is_dep(func):
             annotation = unwrap_tp(func)
@@ -73,6 +68,14 @@ def create_single_dependant[**P, R](
             annotation = Annotated[Any, func.__get_depends__()]
         case _:
             annotation = Annotated[Any, Depends(func)]
+
+    return _create_annotation_dependant(annotation, path=path)
+
+
+@lru_cache(maxsize=1024)
+def _create_annotation_dependant(annotation: Any, /, *, path: str | None = None) -> Dependant:
+    async def _factory(__value__: Any) -> Any:
+        return __value__
 
     cast("HasSignature", _factory).__signature__ = inspect.Signature(
         parameters=[
@@ -89,6 +92,10 @@ def create_single_dependant[**P, R](
         path=path or "",
         call=_factory,
     )
+
+
+def clear_dependant_cache() -> None:
+    _create_annotation_dependant.cache_clear()
 
 
 @overload
@@ -141,6 +148,7 @@ async def resolve_dependencies(
 __all__ = [
     "DependencyResolutionError",
     "MissedDependencyError",
+    "clear_dependant_cache",
     "create_dependant",
     "resolve_dependencies",
 ]
