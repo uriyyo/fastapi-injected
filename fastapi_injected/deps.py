@@ -101,17 +101,18 @@ async def resolve_dependencies(
     *,
     single: bool = False,
 ) -> dict[str, Any]:
-    solved = await solve_dependencies(
-        request=scope.request,
-        dependant=dependant,
-        dependency_cache=copy(scope.dependency_cache),
-        dependency_overrides_provider=get_inject_dependency_override_provider(),
-        # this parameter is deprecated and not used
-        async_exit_stack=cast(AsyncExitStack, None),
-        embed_body_fields=False,
-    )
+    async with scope.lock:
+        solved = await solve_dependencies(
+            request=scope.request,
+            dependant=dependant,
+            dependency_cache=copy(scope.dependency_cache),
+            dependency_overrides_provider=get_inject_dependency_override_provider(),
+            # this parameter is deprecated and not used
+            async_exit_stack=cast(AsyncExitStack, None),
+            embed_body_fields=False,
+        )
 
-    scope.dependency_cache.update(solved.dependency_cache)
+        scope.dependency_cache.update(solved.dependency_cache)
 
     if solved.errors:
         raise ValueError(solved.errors)

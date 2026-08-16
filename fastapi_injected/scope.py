@@ -4,12 +4,13 @@ from contextlib import (
     asynccontextmanager,
 )
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import Request
 from fastapi.routing import APIRoute, APIWebSocketRoute
 from starlette.types import Message, Scope
 
+from ._rlock import RLock
 from .types import DependencyCache
 
 
@@ -50,6 +51,8 @@ def _dummy_request(
 class InjectScope:
     dependency_cache: DependencyCache
     request: Request
+
+    lock: RLock = field(default_factory=RLock, repr=False)
 
     @property
     def path_format(self) -> str | None:
