@@ -241,6 +241,61 @@ except DependencyResolutionError as exc:
 
 It is a `ValueError`, which is what resolution used to raise, so code catching that keeps working.
 
+### Dependencies decided at runtime
+
+A dependency is usually written as an annotation, but sometimes it is a value a caller already has, or one picked while the program runs. `Given` turns a value into a dependency that resolves to it:
+
+```python
+from fastapi_injected import Given, resolve
+
+doc = Doc(title="readme")
+
+await resolve(Given(doc))  # the doc itself
+```
+
+Constants holding equal values are the same dependency, so they share a cache entry and can be overridden like any other. What `Given` returns is a marker held as a value — `DepOf[R]`, as opposed to `Dep[R]`, which is the same marker in annotation position.
+
+`bind_deps` binds such markers to the leading parameters of a function, which is how a dependency graph gets built from markers that were not known when the function was written:
+
+```python
+from fastapi_injected import bind_deps
+
+async def describe(doc: Doc, role: Role) -> str:
+    return f"{doc.title}:{role.name}"
+
+
+bound = bind_deps(describe, Given(doc), RoleDep)
+
+await resolve(bound)  # "readme:admin", with `role` resolved as usual
+```
+
+What a parameter is bound to can be written any way a dependency can be: a marker like `Given(...)`, `Dep[T]` or `DepFactory[T, factory]`, a `Depends(...)`, or the callable itself — the same things `resolve` accepts.
+
+Binding takes the parameters away, and a type checker sees what is left: `bind_deps(describe, Given(doc))` is a function of `(role)`, and binding both leaves one of no arguments at all. The bound function is a dependency like any other — resolve it, `@inject` it, override what it depends on. Binding more markers than the function has parameters is a `TypeError` rather than a silent truncation.
+
+### Dependencies as objects
+
+When the markers belong together, `MakeInjected` makes a dataclass of them: fields annotated with `DepOf` hold the markers, and the call receives what they resolve to.
+
+```python
+from fastapi_injected import Given, MakeInjected
+from fastapi_injected.types import DepOf
+
+
+class IsOwner(MakeInjected):
+    doc: DepOf[Doc]
+    role: DepOf[Role]
+    loud: bool = False        # a plain field stays a plain field
+
+    async def __call__(self, doc: Doc, role: Role) -> bool:
+        return doc.owner == role.name
+
+
+await resolve(IsOwner(doc=Given(doc), role=RoleDep))
+```
+
+It is a `MakeDataclass`, so instances built from equal markers are equal — and therefore one dependency, resolved once per scope and overridable as a whole. For callables that are not dataclasses, the two halves of the binding are available on their own: `signature_with_deps(func, deps)` builds the signature, and `remap_dep_args` turns the arguments it names back into positional ones.
+
 ### Inspecting annotations
 
 A few helpers are exported for code that needs to reason about `Dep[...]` annotations — building override maps, custom decorators, and the like:

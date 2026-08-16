@@ -1,5 +1,5 @@
 from collections import ChainMap
-from collections.abc import Awaitable, Callable, Iterator, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from typing import TYPE_CHECKING, Any, overload
 
 from ._dataclass import MakeDataclass
@@ -10,9 +10,12 @@ from .types import DepDecl, DepReturn, HasDependencyOverrides
 class ValueOverride[T](MakeDataclass):
     value: T
 
+    async def __call__(self) -> T:
+        return self.value
+
 
 class FactoryOverride[**P, T](MakeDataclass):
-    factory: Callable[P, DepReturn[T]]
+    factory: Callable[[], DepReturn[T]]
 
     if TYPE_CHECKING:
 
@@ -38,21 +41,14 @@ def _get_override_key(tp: Any) -> Any:
     return tp
 
 
-def _create_async_resolver[T](val: T) -> Callable[[], Awaitable[T]]:
-    async def _resolver() -> T:
-        return val
-
-    return _resolver
-
-
 def _create_resolver[T](val: T, /) -> Any:
     match val:
-        case ValueOverride(value):
-            return _create_async_resolver(value)
+        case ValueOverride():
+            return val
         case FactoryOverride(factory):
             return factory
         case _:
-            return _create_async_resolver(val)
+            return ValueOverride(val)
 
 
 def _provider_overrides(obj: Any | None, /) -> Iterator[MutableMapping[Any, Any]]:

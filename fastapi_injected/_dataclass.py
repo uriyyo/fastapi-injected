@@ -44,6 +44,9 @@ class MakeDataclass:
 
         cls.__hash__ = _smart_hash(cls.__hash__ or object.__hash__)  # type: ignore[ty:invalid-assignment]
 
+    def __post_init__(self) -> None:
+        pass
+
     if TYPE_CHECKING:
 
         def __hash__(self) -> int:

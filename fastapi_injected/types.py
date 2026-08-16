@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, runtime_che
 
 from fastapi import Depends
 from fastapi.types import DependencyCacheKey
-from typing_extensions import sentinel
+from typing_extensions import TypeForm, sentinel
 
 if TYPE_CHECKING:
     Injected: Any = object()
@@ -63,6 +63,11 @@ class HasDependencyOverrides(Protocol):
     dependency_overrides: Mapping[Any, Any]
 
 
+if TYPE_CHECKING:
+    type DepOf[R] = TypeForm[R]
+else:
+    DepOf = Dep
+
 type DepShape[R] = Coro[R] | AsyncIterator[R] | Iterator[R]
 type DepReturn[R] = DepShape[R] | R
 type DepDecl[**P, R] = Callable[P, DepShape[R]]
@@ -76,6 +81,7 @@ __all__ = [
     "Dep",
     "DepDecl",
     "DepFactory",
+    "DepOf",
     "DepReturn",
     "DepShape",
     "DependencyCache",
