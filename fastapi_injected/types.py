@@ -2,9 +2,10 @@ import inspect
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, runtime_checkable
 
-from fastapi import Depends
 from fastapi.types import DependencyCacheKey
 from typing_extensions import TypeForm, sentinel
+
+from ._params import Depends
 
 if TYPE_CHECKING:
     Injected: Any = object()

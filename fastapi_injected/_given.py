@@ -1,8 +1,7 @@
 from typing import Annotated, Any, cast
 
-from fastapi import Depends
-
 from ._dataclass import MakeDataclass
+from ._params import Depends
 from .types import DepOf
 
 
