@@ -46,6 +46,11 @@ type Decorator[**P, R] = Callable[
     Callable[P, R],
 ]
 
+type AsyncDecorator[**P, R] = Callable[
+    [AsyncFunc[P, R]],
+    AsyncFunc[P, R],
+]
+
 type DependencyCache = dict[DependencyCacheKey, Any]
 
 
@@ -62,6 +67,7 @@ type DepReturn[R] = Coro[R] | Iterator[R] | AsyncIterator[R] | R
 
 __all__ = [
     "Arg",
+    "AsyncDecorator",
     "AsyncFunc",
     "Coro",
     "Decorator",

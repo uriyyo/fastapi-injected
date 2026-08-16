@@ -4,7 +4,7 @@ from typing import overload
 from .deps import create_dependant, resolve_dependencies
 from .scope import inside_inject_scope
 from .sign import strip_sign
-from .types import AsyncFunc, Decorator
+from .types import AsyncDecorator, AsyncFunc
 
 
 @overload
@@ -19,7 +19,7 @@ def inject[**P, R](
 def inject[**P, R](
     *,
     new_scope: bool = False,
-) -> Decorator[P, R]:
+) -> AsyncDecorator[P, R]:
     pass
 
 
@@ -28,7 +28,7 @@ def inject[**P, R](
     /,
     *,
     new_scope: bool = False,
-) -> AsyncFunc[P, R] | Decorator[P, R]:
+) -> AsyncFunc[P, R] | AsyncDecorator[P, R]:
     if func is None:
         return partial(inject, new_scope=new_scope)  # type: ignore[ty:invalid-return-type]
 

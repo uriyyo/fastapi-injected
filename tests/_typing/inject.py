@@ -59,3 +59,12 @@ async def _negatives() -> None:
     await handler(1, unknown=1)  # type: ignore[ty:unknown-argument]
 
     inject(new_scope="yes")  # type: ignore[ty:invalid-argument-type]
+
+    # the wrapper awaits what it decorates, so sync functions are rejected by both forms
+    @inject  # type: ignore[ty:invalid-argument-type]
+    def _sync(*, container: Dep[Container] = Injected) -> None:
+        pass
+
+    @inject(new_scope=True)  # type: ignore[ty:invalid-argument-type]
+    def _sync_new_scope(*, container: Dep[Container] = Injected) -> None:
+        pass
