@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, Request, WebSocket, routing
 from fastapi.dependencies import utils
 
-from .overrides import push_overrides
+from ._cache import ScopeCache
 from .scope import push_inject_scope
 from .types import DependencyCache
 
@@ -26,12 +26,15 @@ if not TYPE_CHECKING:
         dependency_cache: DependencyCache | None = None,
         **kwargs: Any,
     ) -> utils.SolvedDependency:
-        if (current_cache := request.scope.get(_DEPENDENCY_CACHE_KEY)) is not None:
-            dependency_cache = current_cache
-        elif dependency_cache is None:
-            dependency_cache = {}
+        # a scope brought its own cache - it already reads through to the request one,
+        # and knows what its overrides make unusable there
+        if not isinstance(dependency_cache, ScopeCache):
+            if (current_cache := request.scope.get(_DEPENDENCY_CACHE_KEY)) is not None:
+                dependency_cache = current_cache
+            elif dependency_cache is None:
+                dependency_cache = {}
 
-        request.scope[_DEPENDENCY_CACHE_KEY] = dependency_cache
+            request.scope[_DEPENDENCY_CACHE_KEY] = dependency_cache
 
         return await _base_solve_dependencies(
             request=request,
@@ -51,12 +54,12 @@ def _get_dependency_cache(request: Request) -> DependencyCache:
 
 
 async def init_inject_scope(request: Request) -> AsyncGenerator[None]:
-    with push_overrides(provider=request.scope["route"].dependency_overrides_provider):
-        async with push_inject_scope(
-            dependency_cache=_get_dependency_cache(request),
-            request=request,
-        ):
-            yield
+    async with push_inject_scope(
+        dependency_cache=_get_dependency_cache(request),
+        request=request,
+        provider=request.scope["route"].dependency_overrides_provider,
+    ):
+        yield
 
 
 def add_injected_scope(

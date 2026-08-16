@@ -1,8 +1,10 @@
 import asyncio
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import field
 from types import TracebackType
 from typing import Self
+
+from ._dataclass import MakeDataclass
 
 # ownership is tracked per context, not per task - a task spawned by the holder inherits
 # a copy of its context, so work it does on the holder's behalf is not blocked by it
@@ -12,8 +14,7 @@ _held_locks: ContextVar[frozenset["RLock"]] = ContextVar(
 )
 
 
-@dataclass(eq=False)
-class RLock:
+class RLock(MakeDataclass, eq=False):
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _depth: int = field(default=0, repr=False)
 

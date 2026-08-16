@@ -1,27 +1,27 @@
-from collections.abc import AsyncIterator
-
 from fastapi_injected import Dep, DepFactory, FactoryOverride, ValueOverride, push_overrides
-from fastapi_injected.overrides import NonFreshScopeError, OverridesProvider
+from fastapi_injected.overrides import OverridesProvider
+from fastapi_injected.scope import InjectScope
 
 from .deps import (
     Child,
     Container,
     ContextState,
     TypeOf,
+    coro_ctx_dep,
     ctx_dep,
     get_value,
     is_equivalent_to,
-    is_subtype_of,
     static_assert,
+    sync_ctx_dep,
 )
-
-static_assert(is_subtype_of(NonFreshScopeError, Exception))
 
 # the wrappers are generic in what they produce
 static_assert(is_equivalent_to(TypeOf[ValueOverride(ContextState())], ValueOverride[ContextState]))
 static_assert(is_equivalent_to(TypeOf[ValueOverride(1)], ValueOverride[int]))
-# a generator factory is not unwrapped by the type checker, it keeps the type it declares
-static_assert(is_equivalent_to(TypeOf[FactoryOverride(ctx_dep)], FactoryOverride[[], AsyncIterator[ContextState]]))
+# a factory is typed by what it produces, whatever shape it returns it in
+static_assert(is_equivalent_to(TypeOf[FactoryOverride(ctx_dep)], FactoryOverride[[], ContextState]))
+static_assert(is_equivalent_to(TypeOf[FactoryOverride(coro_ctx_dep)], FactoryOverride[[], ContextState]))
+static_assert(is_equivalent_to(TypeOf[FactoryOverride(sync_ctx_dep)], FactoryOverride[[], ContextState]))
 static_assert(is_equivalent_to(TypeOf[FactoryOverride(get_value)], FactoryOverride[[], int]))
 
 
@@ -41,12 +41,19 @@ def _overrides() -> None:
     with push_overrides():
         pass
 
-    with push_overrides(provider=OverridesProvider({Child: Child()}), require_fresh_scope=False):
+    with push_overrides(provider=OverridesProvider({Child: Child()})):
         pass
+
+    # every override block is a scope of its own
+    with push_overrides() as scope:
+        static_assert(is_equivalent_to(TypeOf[scope], InjectScope))
+
+        with scope.override({Child: Child()}) as nested:
+            static_assert(is_equivalent_to(TypeOf[nested], InjectScope))
 
 
 def _negatives() -> None:
-    push_overrides(require_fresh_scope="yes")  # type: ignore[ty:invalid-argument-type]
+    push_overrides(require_fresh_scope=True)  # type: ignore[ty:unknown-argument]
     push_overrides(provider=object())  # type: ignore[ty:invalid-argument-type]
     push_overrides({}, {})  # type: ignore[ty:too-many-positional-arguments]
 

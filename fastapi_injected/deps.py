@@ -1,8 +1,6 @@
 import inspect
-from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, AsyncExitStack, contextmanager
-from contextvars import ContextVar, Token
-from copy import copy
+from collections.abc import Callable
+from contextlib import AsyncExitStack
 from functools import lru_cache, wraps
 from typing import Annotated, Any, Literal, Protocol, cast, overload, runtime_checkable
 
@@ -13,7 +11,7 @@ from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve
 from ._deps_tp import is_dep, unwrap_tp
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
-from .types import Coro, HasSignature
+from .types import Coro, DependencyCache, HasSignature
 
 
 @runtime_checkable
@@ -103,16 +101,14 @@ async def resolve_dependencies(
 ) -> dict[str, Any]:
     async with scope.lock:
         solved = await solve_dependencies(
-            request=scope.request,
+            request=scope.bound_request,
             dependant=dependant,
-            dependency_cache=copy(scope.dependency_cache),
-            dependency_overrides_provider=get_inject_dependency_override_provider(),
+            dependency_cache=cast("DependencyCache", scope.cache_for(dependant)),
+            dependency_overrides_provider=scope,
             # this parameter is deprecated and not used
             async_exit_stack=cast(AsyncExitStack, None),
             embed_body_fields=False,
         )
-
-        scope.dependency_cache.update(solved.dependency_cache)
 
     if solved.errors:
         raise ValueError(solved.errors)
@@ -126,33 +122,7 @@ async def resolve_dependencies(
     return solved.values
 
 
-_dependency_override_provider: ContextVar[Any] = ContextVar(
-    "_dependency_override_provider",
-    default=None,
-)
-
-
-@contextmanager
-def _reset_token(var: ContextVar[Any], token: Token[Any]) -> Iterator[None]:
-    try:
-        yield
-    finally:
-        var.reset(token)
-
-
-def set_inject_dependency_override_provider(provider: Any, /) -> AbstractContextManager[None]:
-    token = _dependency_override_provider.set(provider)
-
-    return _reset_token(_dependency_override_provider, token)
-
-
-def get_inject_dependency_override_provider() -> Any | None:
-    return _dependency_override_provider.get()
-
-
 __all__ = [
     "create_dependant",
-    "get_inject_dependency_override_provider",
     "resolve_dependencies",
-    "set_inject_dependency_override_provider",
 ]

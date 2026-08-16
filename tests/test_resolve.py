@@ -96,3 +96,29 @@ async def test_resolve_depends_hook_no_cache():
         b2 = await resolve(DependsHook(use_cache=False))
 
         assert b1 is not b2
+
+
+class CallableFactory:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __call__(self) -> Iterator[Foo]:
+        yield Foo()
+        self.closed = True
+
+
+async def test_resolve_callable_object_generator():
+    factory = CallableFactory()
+
+    assert isinstance(await resolve(factory), Foo)
+    # fastapi looks through `__call__`, so it is torn down like any generator dependency
+    assert factory.closed
+
+
+def list_factory() -> list[Foo]:
+    return [Foo()]
+
+
+async def test_resolve_collection_factory():
+    # a collection is the value, not something to iterate for one
+    assert isinstance(await resolve(list_factory), list)

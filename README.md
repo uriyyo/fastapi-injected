@@ -164,14 +164,54 @@ with push_overrides(
 
 Overrides apply to the whole graph, not just top-level parameters — overriding a nested dependency changes what its dependents receive. Nested `push_overrides` blocks merge, with the innermost one winning.
 
-Because the surrounding scope caches resolved dependencies, an override pushed after something has already been built would silently have no effect. To catch that, `push_overrides` raises `NonFreshScopeError` if the current scope already holds cached dependencies. Pass `require_fresh_scope=False` if you know what you are doing and want the override to apply only to what has not been resolved yet:
+An override block is a scope of its own: it caches what it builds, and that cache goes away with the block. The surrounding scope keeps what it had resolved before, and it stays visible — except for the overridden dependencies and anything built from them, which are resolved again under the override:
 
 ```python
 async with push_inject_scope():
-    await handler()  # dependencies cached here
+    real = await handler()  # dependencies cached here
 
-    with push_overrides({Session: fake}):  # raises NonFreshScopeError
-        ...
+    with push_overrides({Session: fake}):
+        await handler()  # rebuilt with `fake`, everything else reused from the cache
+
+    await handler()  # back to the cached, real dependencies
+```
+
+Overrides can also be handed to the scope directly, which is the same thing in one call:
+
+```python
+async with push_inject_scope({Session: fake}) as scope:
+    await handler()
+
+    with scope.override({Session: other}):  # nest freely
+        await handler()
+```
+
+### Dependencies that are objects
+
+Dependants are cached by the callable that resolves them, so a dependency that is an object — a class holding configuration, a parametrized resolver — has to be hashable to get there. A plain dataclass is not, and a frozen one still refuses as soon as it holds a list or a dict.
+
+`MakeDataclass` is a base class that makes its subclasses dataclasses with a hash that always answers: by fields when they can be hashed, by identity when they cannot.
+
+```python
+from dataclasses import field
+from fastapi_injected import MakeDataclass, resolve
+
+
+class Settings(MakeDataclass):
+    hosts: list[str] = field(default_factory=list)
+
+    def __call__(self) -> list[str]:
+        return self.hosts
+
+
+await resolve(Settings(["a", "b"]))  # a plain dataclass would raise TypeError here
+```
+
+Every `dataclasses.dataclass` option is accepted as a class keyword and passed straight through:
+
+```python
+class Config(MakeDataclass, frozen=True, kw_only=True):
+    retries: int = 3
 ```
 
 ### Inspecting annotations

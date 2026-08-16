@@ -1,38 +1,18 @@
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable
 from typing import Any, overload
 
 from typing_extensions import TypeForm
 
 from .deps import HasDependsHook, create_single_dependant, resolve_dependencies
 from .scope import inside_inject_scope
-from .types import Coro
+from .types import DepDecl, DepShape
 
 type _Factory[**P, R] = Callable[P, R] | HasDependsHook[P, R]
 
 
 @overload
 async def resolve[**P, R](
-    tp: _Factory[P, Coro[R]],
-    /,
-    *,
-    new_scope: bool = False,
-) -> R:
-    pass
-
-
-@overload
-async def resolve[**P, R](
-    tp: _Factory[P, AsyncIterator[R]],
-    /,
-    *,
-    new_scope: bool = False,
-) -> R:
-    pass
-
-
-@overload
-async def resolve[**P, R](
-    tp: _Factory[P, Iterator[R]],
+    tp: DepDecl[P, R] | HasDependsHook[P, DepShape[R]],
     /,
     *,
     new_scope: bool = False,

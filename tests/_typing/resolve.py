@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 from fastapi import Depends, params
 
 from fastapi_injected import Dep, DepFactory, resolve
@@ -58,3 +60,31 @@ async def _negatives() -> None:
 
     # what `resolve` returns is the dependency, not the marker
     _ = (await resolve(Container)).unknown  # type: ignore[ty:unresolved-attribute]
+
+
+class CallableDep:
+    def __call__(self) -> Iterator[ContextState]:
+        yield ContextState()
+
+
+def list_dep() -> list[int]:
+    return [1]
+
+
+def dict_dep() -> dict[str, int]:
+    return {}
+
+
+def str_dep() -> str:
+    return ""
+
+
+async def _resolve_shapes() -> None:
+    # a generator behind `__call__` is a generator dependency to fastapi as well
+    static_assert(is_equivalent_to(TypeOf[await resolve(CallableDep())], ContextState))
+
+    # a dependency returning a collection produces the collection, not what is inside it,
+    # which is why `Iterable` is not one of the shapes a dependency can declare through
+    static_assert(is_equivalent_to(TypeOf[await resolve(list_dep)], list[int]))
+    static_assert(is_equivalent_to(TypeOf[await resolve(dict_dep)], dict[str, int]))
+    static_assert(is_equivalent_to(TypeOf[await resolve(str_dep)], str))

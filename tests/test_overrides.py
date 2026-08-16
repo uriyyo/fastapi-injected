@@ -4,12 +4,7 @@ from typing import Any
 
 import pytest
 
-from fastapi_injected import Dep, ValueOverride, push_inject_scope, push_overrides, resolve
-from fastapi_injected.overrides import (
-    NonFreshScopeError,
-    OverridesProvider,
-    create_fallback_override_provider,
-)
+from fastapi_injected import ValueOverride, push_inject_scope, push_overrides, resolve
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -68,7 +63,7 @@ async def test_push_overrides_fallback_to_outer_provider():
     child, ctx = Child(), ContextState()
 
     with push_overrides({Child: ValueOverride(child)}):
-        with push_overrides({ctx_dep: ValueOverride(ctx)}, require_fresh_scope=False):
+        with push_overrides({ctx_dep: ValueOverride(ctx)}):
             container = await resolve(Container)
 
             # `ctx` comes from the inner overrides, `child` falls back to the outer ones
@@ -85,23 +80,41 @@ async def test_push_overrides_provider_fallback_to_outer_provider():
     outer = Child()
     provider = Provider()
 
-    with push_overrides({Child: ValueOverride(outer)}), push_overrides(provider=provider, require_fresh_scope=False):
+    with push_overrides({Child: ValueOverride(outer)}), push_overrides(provider=provider):
         container = await resolve(Container)
 
     assert container.child is outer
 
 
-async def test_push_overrides_requires_fresh_scope():
+async def test_push_overrides_inside_a_used_scope():
     async with push_inject_scope():
-        await resolve(Container)
+        before = await resolve(Container)
 
-        with pytest.raises(NonFreshScopeError), push_overrides({Child: ValueOverride(Child())}):
-            pass  # pragma: no cover
+        child = Child()
+        with push_overrides({Child: ValueOverride(child)}):
+            # the override applies even though the scope has already resolved the graph
+            overridden = await resolve(Container)
+
+            assert overridden.child is child
+            assert overridden is not before
+
+        # ... and what it produced does not outlive the block
+        assert (await resolve(Container)) is before
 
 
-async def test_create_fallback_override_provider():
-    child = Child()
-    provider = create_fallback_override_provider(overrides={Dep[Child]: ValueOverride(child)})
+async def test_push_overrides_reuses_what_it_does_not_override():
+    async with push_inject_scope():
+        before = await resolve(Container)
 
-    assert isinstance(provider, OverridesProvider)
-    assert list(provider.dependency_overrides) == [Child]
+        with push_overrides({Child: ValueOverride(Child())}):
+            # `ctx` does not depend on the overridden dependency, so it is not rebuilt
+            assert (await resolve(ctx_dep)) is before.ctx
+
+
+async def test_push_overrides_caches_inside_the_block():
+    async with push_inject_scope():
+        with push_overrides({Child: ValueOverride(Child())}):
+            first = await resolve(Container)
+            second = await resolve(Container)
+
+            assert first is second

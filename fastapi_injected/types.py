@@ -63,7 +63,9 @@ class HasDependencyOverrides(Protocol):
     dependency_overrides: Mapping[Any, Any]
 
 
-type DepReturn[R] = Coro[R] | Iterator[R] | AsyncIterator[R] | R
+type DepShape[R] = Coro[R] | AsyncIterator[R] | Iterator[R]
+type DepReturn[R] = DepShape[R] | R
+type DepDecl[**P, R] = Callable[P, DepShape[R]]
 
 __all__ = [
     "Arg",
@@ -72,8 +74,10 @@ __all__ = [
     "Coro",
     "Decorator",
     "Dep",
+    "DepDecl",
     "DepFactory",
     "DepReturn",
+    "DepShape",
     "DependencyCache",
     "Func",
     "HasDependencyOverrides",

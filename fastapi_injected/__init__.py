@@ -1,3 +1,4 @@
+from ._dataclass import MakeDataclass
 from ._deps_tp import is_dep, unwrap_dep_dependency, unwrap_dep_tp
 from ._fastapi_lifecycle import add_injected_scope, init_inject_scope
 from .inject import inject
@@ -12,6 +13,7 @@ __all__ = [
     "DepFactory",
     "FactoryOverride",
     "Injected",
+    "MakeDataclass",
     "ValueOverride",
     "add_injected_scope",
     "init_inject_scope",

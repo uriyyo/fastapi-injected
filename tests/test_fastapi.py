@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from fastapi_injected import Dep, Injected, init_inject_scope, inject, push_inject_scope, resolve
 from fastapi_injected._fastapi_lifecycle import add_injected_scope
-from fastapi_injected.scope import current_inject_scope
+from fastapi_injected.scope import InjectScope
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -82,7 +82,7 @@ def test_nested_scope_owns_its_lifetime() -> None:
 
 @app.get("/synthetic")
 async def synthetic_route(request: Request) -> dict[str, bool]:
-    scope = current_inject_scope()
+    scope = InjectScope.current()
     assert scope is not None
 
     async with push_inject_scope(request=request) as nested:
