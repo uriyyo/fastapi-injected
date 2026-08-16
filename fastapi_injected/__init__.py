@@ -4,9 +4,10 @@ from .inject import inject
 from .overrides import FactoryOverride, ValueOverride, push_overrides
 from .resolve import resolve
 from .scope import push_inject_scope
-from .types import Dep, DepFactory, Injected
+from .types import Arg, Dep, DepFactory, Injected
 
 __all__ = [
+    "Arg",
     "Dep",
     "DepFactory",
     "FactoryOverride",

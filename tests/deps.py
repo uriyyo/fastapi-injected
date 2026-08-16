@@ -28,6 +28,11 @@ class Container:
     ctx: DepFactory[ContextState, ctx_dep]
 
 
+class NonPydanticType:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+
 def get_value() -> int:
     return 1
 
@@ -41,6 +46,7 @@ __all__ = [
     "Child",
     "Container",
     "ContextState",
+    "NonPydanticType",
     "State",
     "ctx_dep",
 ]

@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING
 
-from fastapi_injected import Dep, DepFactory, Injected, inject, resolve
+from fastapi_injected import Arg, Dep, DepFactory, Injected, inject, resolve
 
-from .deps import Child, Container, ContextState, ctx_dep
+from .deps import Child, Container, ContextState, NonPydanticType, ctx_dep
 
 if TYPE_CHECKING:
     from ty_extensions import static_assert
@@ -22,6 +22,18 @@ async def func(
     return a + 10
 
 
+@inject
+async def func_with_arg(
+    a: Arg[NonPydanticType],
+    *,
+    container: Dep[Container] = Injected,
+) -> int:
+    static_assert(is_equivalent_to(TypeOf[a], NonPydanticType))
+    static_assert(is_equivalent_to(TypeOf[container], Container))
+
+    return a.value
+
+
 async def resolve_test() -> None:
     container = await resolve(Container)
 
@@ -29,5 +41,6 @@ async def resolve_test() -> None:
 
 
 if TYPE_CHECKING:
+    static_assert(is_equivalent_to(Arg[Container], Container))
     static_assert(is_equivalent_to(Dep[Container], Container))
     static_assert(is_equivalent_to(DepFactory[ContextState, ctx_dep], ContextState))

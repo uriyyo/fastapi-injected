@@ -56,6 +56,7 @@ await handler()
 
 - `Dep[T]` — resolve `T` by calling it, same as FastAPI's `Annotated[T, Depends()]`.
 - `DepFactory[T, factory]` — resolve `T` via a factory, same as `Annotated[T, Depends(factory)]`. Generator factories get proper teardown.
+- `Arg[T]` — mark a parameter as a plain caller-supplied argument, for types pydantic cannot validate. See [Non-pydantic arguments](#non-pydantic-arguments).
 - `Injected` — a sentinel default that exists purely to make type checkers happy: without it they would complain about a missing argument at call sites. At runtime the parameter is always filled in by `@inject`.
 
 Injected parameters mix freely with regular ones — pass your own arguments as usual and the rest is injected:
@@ -68,6 +69,36 @@ async def add(a: int, b: int, *, service: Dep[Service] = Injected) -> int:
 
 result = await add(1, 2)
 ```
+
+### Non-pydantic arguments
+
+Regular parameters still go through FastAPI's parameter analysis, so their annotations have to be valid pydantic field types. A plain class that pydantic cannot handle makes `@inject` fail at decoration time:
+
+```python
+class Connection:  # not a pydantic-friendly type
+    ...
+
+
+@inject
+async def handler(conn: Connection, *, service: Dep[Service] = Injected) -> None:
+    ...  # FastAPIError: Invalid args for response field!
+```
+
+Wrap such parameters in `Arg[...]` to hide them from that analysis:
+
+```python
+from fastapi_injected import Arg
+
+
+@inject
+async def handler(conn: Arg[Connection], *, service: Dep[Service] = Injected) -> None:
+    ...
+
+
+await handler(connection)
+```
+
+`Arg[T]` is a no-op for type checkers — the parameter stays typed as `T` — and at runtime it only tells `@inject` that this argument comes from the caller, not from the dependency graph. It is needed only for annotations pydantic rejects; ordinary types work without it.
 
 ### Resolving a type directly
 

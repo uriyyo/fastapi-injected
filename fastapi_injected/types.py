@@ -18,6 +18,10 @@ else:
 
     Dep = Annotated[_T, Depends()]
 
+if TYPE_CHECKING:
+    type Arg[T] = Annotated[T, ...]
+else:
+    type Arg[T] = Any
 
 if TYPE_CHECKING:
     from typing import Annotated as DepFactory
@@ -57,6 +61,7 @@ class HasDependencyOverrides(Protocol):
 type DepReturn[R] = Coro[R] | Iterator[R] | AsyncIterator[R] | R
 
 __all__ = [
+    "Arg",
     "AsyncFunc",
     "Coro",
     "Decorator",

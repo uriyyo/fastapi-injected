@@ -1,8 +1,9 @@
 import pytest
+from fastapi.exceptions import FastAPIError
 
-from fastapi_injected import Dep, Injected, inject, push_inject_scope
+from fastapi_injected import Arg, Dep, Injected, inject, push_inject_scope
 
-from .deps import Child, Container, ContextState
+from .deps import Child, Container, ContextState, NonPydanticType
 
 pytestmark = pytest.mark.asyncio
 
@@ -67,6 +68,34 @@ async def test_inject_func_with_args():
 
     result = await func(1, 2)
     assert result == 3
+
+
+async def test_inject_func_with_non_pydantic_arg():
+    @inject
+    async def func(
+        a: Arg[NonPydanticType],
+        *,
+        b: Arg[NonPydanticType],
+        bar: Dep[Container] = Injected,
+    ) -> int:
+        assert isinstance(bar, Container)
+
+        return a.value + b.value
+
+    result = await func(NonPydanticType(1), b=NonPydanticType(2))
+    assert result == 3
+
+
+async def test_inject_func_with_non_pydantic_arg_without_arg_helper():
+    with pytest.raises(FastAPIError, match="Invalid args for response field"):
+
+        @inject
+        async def func(
+            a: NonPydanticType,
+            *,
+            bar: Dep[Container] = Injected,
+        ) -> int:
+            return a.value
 
 
 async def test_inject_teardown():
