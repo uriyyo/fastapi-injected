@@ -1,12 +1,12 @@
 import inspect
 from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Annotated, Any, Concatenate, overload
+from typing import Annotated, Any, Concatenate, get_origin, overload
 
 from fastapi.dependencies.utils import get_typed_signature
 from fastapi.params import Depends
 
-from ._deps_tp import is_dep
+from ._deps_tp import unwrap_tp
 from .sign import update_func_sign
 from .types import AsyncFunc, DepOf, Func
 
@@ -33,13 +33,15 @@ def _dep_arg_index(name: str, /) -> int | None:
     return int(index) if index.isdigit() else None
 
 
+def _is_annotation(tp: Any, /) -> bool:
+    return get_origin(unwrap_tp(tp)) is Annotated
+
+
 def _dep_annotation(dep: DepOf[Any] | Callable[..., Any], /) -> Any:
     if isinstance(dep, Depends):
         return Annotated[Any, dep]
 
-    # a marker is an annotation already, while a callable is a dependency the same way
-    # `resolve` takes one - anything else is left as it was written
-    if is_dep(dep) or not callable(dep):
+    if _is_annotation(dep) or not callable(dep):
         return dep
 
     return Annotated[Any, Depends(dep)]

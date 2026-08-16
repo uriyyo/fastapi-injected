@@ -2,9 +2,19 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
-from fastapi import Depends
+from fastapi import Depends, FastAPI, Header
+from fastapi.testclient import TestClient
 
-from fastapi_injected import Given, bind_deps, inject, push_inject_scope, push_overrides, resolve, signature_with_deps
+from fastapi_injected import (
+    Given,
+    bind_deps,
+    init_inject_scope,
+    inject,
+    push_inject_scope,
+    push_overrides,
+    resolve,
+    signature_with_deps,
+)
 from fastapi_injected._bind import UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
 
 pytestmark = pytest.mark.asyncio
@@ -85,6 +95,30 @@ async def test_binding_more_than_there_are_parameters():
 async def test_a_dependency_can_be_bound_however_it_is_written(dep):
     # a callable is a dependency the same way `resolve` takes one, not a parameter of its own
     assert await resolve(bind_deps(describe, Given(Doc()), dep)) == "readme:admin"
+
+
+TitleHeader = Annotated[str, Header(alias="x-title")]
+
+
+async def titled(title: str, role: Role) -> str:
+    return f"{title}:{role.name}"
+
+
+async def test_a_request_marker_is_bound_as_written() -> None:
+    sign = signature_with_deps(titled, TitleHeader, RoleDep)
+
+    assert next(iter(sign.parameters.values())).annotation == TitleHeader
+
+
+async def test_a_request_marker_resolves_from_the_request() -> None:
+    app = FastAPI(dependencies=[Depends(init_inject_scope)])
+
+    @app.get("/marker")
+    async def _route(described: Annotated[str, Depends(bind_deps(titled, TitleHeader, RoleDep))]) -> str:
+        return described
+
+    with TestClient(app) as client:
+        assert client.get("/marker", headers={"x-title": "readme"}).json() == "readme:admin"
 
 
 async def test_signature_with_deps_names_the_bound_parameters() -> None:
