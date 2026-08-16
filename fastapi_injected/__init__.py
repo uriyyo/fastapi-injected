@@ -4,7 +4,6 @@ from ._deps_tp import is_arg, is_dep, unwrap_dep_dependency, unwrap_dep_tp
 from ._fastapi_lifecycle import MissingDependencyCacheError, add_injected_scope, init_inject_scope
 from ._given import Given
 from ._injected import MakeInjected
-from ._params import Depends, Security
 from .deps import (
     DependencyResolutionError,
     HasDependsHook,
@@ -25,7 +24,6 @@ __all__ = [
     "DepFactory",
     "DepOf",
     "DependencyResolutionError",
-    "Depends",
     "FactoryOverride",
     "Given",
     "HasDependsHook",
@@ -38,7 +36,6 @@ __all__ = [
     "NotADependencyError",
     "Overrides",
     "OverridesProvider",
-    "Security",
     "UnboundDepArgsError",
     "UnboundScopeError",
     "ValueOverride",

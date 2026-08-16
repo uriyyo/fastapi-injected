@@ -3,11 +3,10 @@ from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import Annotated, Any, Concatenate, overload
 
-from fastapi import params
 from fastapi.dependencies.utils import get_typed_signature
+from fastapi.params import Depends
 
 from ._deps_tp import is_dep
-from ._params import Depends
 from .sign import update_func_sign
 from .types import AsyncFunc, DepOf, Func
 
@@ -35,7 +34,7 @@ def _dep_arg_index(name: str, /) -> int | None:
 
 
 def _dep_annotation(dep: DepOf[Any] | Callable[..., Any], /) -> Any:
-    if isinstance(dep, params.Depends):
+    if isinstance(dep, Depends):
         return Annotated[Any, dep]
 
     # a marker is an annotation already, while a callable is a dependency the same way

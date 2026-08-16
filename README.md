@@ -232,18 +232,6 @@ class Config(MakeDataclass, frozen=True, kw_only=True):
     retries: int = 3
 ```
 
-The same is true of what holds a dependency. FastAPI's `Depends` and `Security` are frozen dataclasses, so they hash by field — and `Security(get_user, scopes=["items:read"])`, the documented spelling, holds a list, which makes the whole annotation unhashable and fails as a bare `TypeError` from `typing`. `fastapi_injected` ships both as `MakeDataclass` subclasses, which is the same class in every way that matters to FastAPI, and one that can be cached:
-
-```python
-from fastapi_injected import Security, resolve
-
-type CurrentUser = Annotated[User, Security(get_user, scopes=["items:read"])]
-
-await resolve(CurrentUser)
-```
-
-Scopes are kept as a tuple, so the same scopes written as another list stay one dependency. Everything the package builds internally is held this way too, so a dependency object that cannot be hashed by fields no longer decides whether the annotation around it can be.
-
 ### When resolution fails
 
 A dependency can fail to resolve for the same reasons it would in a route — a missing header, a query parameter that does not validate. `DependencyResolutionError` carries those errors in the shape pydantic produced them, and turns into the response FastAPI would have returned:
@@ -348,7 +336,7 @@ Everything the package supports is importable from `fastapi_injected` itself, an
 
 | | |
 | --- | --- |
-| Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected`, `Depends`, `Security` |
+| Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
 | Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
 | Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `push_overrides`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
 | Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency` |

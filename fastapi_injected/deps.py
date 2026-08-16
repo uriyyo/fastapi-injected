@@ -4,13 +4,12 @@ from contextlib import AsyncExitStack
 from functools import lru_cache, wraps
 from typing import Annotated, Any, Literal, Protocol, cast, overload, runtime_checkable
 
-from fastapi import params
+from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 from fastapi.exceptions import RequestValidationError
 
 from ._deps_tp import is_dep, unwrap_tp
-from ._params import Depends
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
 from .types import Coro, DependencyCache, HasSignature
