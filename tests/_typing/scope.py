@@ -17,6 +17,7 @@ async def _scope() -> None:
         static_assert(is_equivalent_to(TypeOf[scope.dependency_cache], DependencyCache))
         static_assert(is_equivalent_to(TypeOf[scope.request], Request))
         static_assert(is_equivalent_to(TypeOf[scope.path_format], str | None))
+        static_assert(is_equivalent_to(TypeOf[scope.synthetic], bool))
 
     # an existing cache and request can be reused
     async with push_inject_scope(dependency_cache={}, request=None):

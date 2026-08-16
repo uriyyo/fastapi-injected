@@ -13,6 +13,8 @@ from starlette.types import Message, Scope
 from ._rlock import RLock
 from .types import DependencyCache
 
+_SYNTHETIC_REQUEST_KEY = "__fastapi_injected_synthetic_request__"
+
 
 def _dummy_scope() -> Scope:
     return {
@@ -20,6 +22,7 @@ def _dummy_scope() -> Scope:
         "http_version": "1.1",
         "query_string": b"",
         "headers": [],
+        _SYNTHETIC_REQUEST_KEY: True,
     }
 
 
@@ -47,6 +50,21 @@ def _dummy_request(
     )
 
 
+def _rebind_request(
+    request: Request,
+    /,
+    *,
+    extra_scope: Scope,
+) -> Request:
+    scope = {**request.scope, **extra_scope}
+
+    return Request(
+        scope,
+        receive=request.receive,
+        send=request._send,  # noqa: SLF001
+    )
+
+
 @dataclass
 class InjectScope:
     dependency_cache: DependencyCache
@@ -61,6 +79,10 @@ class InjectScope:
                 return route.path_format
             case _:
                 return None
+
+    @property
+    def synthetic(self) -> bool:
+        return bool(self.request.scope.get(_SYNTHETIC_REQUEST_KEY, False))
 
 
 _inject_scope: ContextVar[InjectScope | None] = ContextVar(
@@ -79,11 +101,15 @@ async def push_inject_scope(
         dependency_cache = {}
 
     async with AsyncExitStack() as stack:
-        request = request or _dummy_request(
-            extra_scope={
-                "fastapi_inner_astack": stack,
-                "fastapi_function_astack": stack,
-            },
+        extra_scope: Scope = {
+            "fastapi_inner_astack": stack,
+            "fastapi_function_astack": stack,
+        }
+
+        request = (
+            _rebind_request(request, extra_scope=extra_scope)
+            if request is not None
+            else _dummy_request(extra_scope=extra_scope)
         )
 
         scope = InjectScope(dependency_cache, request)
