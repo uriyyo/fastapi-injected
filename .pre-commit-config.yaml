@@ -23,4 +23,4 @@ repos:
         language: python
         name: ty
         pass_filenames: false
-        entry: uv run ty check fastapi_injected tests/test_typing.py --error-on-warning
+        entry: uv run ty check fastapi_injected tests/_typing --error-on-warning
