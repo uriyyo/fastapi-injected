@@ -1,28 +1,36 @@
 import asyncio
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Any, Self
+from typing import Self
+
+# ownership is tracked per context, not per task - a task spawned by the holder inherits
+# a copy of its context, so work it does on the holder's behalf is not blocked by it
+_held_locks: ContextVar[frozenset["RLock"]] = ContextVar(
+    "_held_locks",
+    default=frozenset(),
+)
 
 
-@dataclass
+@dataclass(eq=False)
 class RLock:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
-    _owner: asyncio.Task[Any] | None = field(default=None, repr=False)
     _depth: int = field(default=0, repr=False)
 
     def locked(self) -> bool:
         return self._lock.locked()
 
-    async def acquire(self) -> None:
-        task = asyncio.current_task()
+    def owned(self) -> bool:
+        return self in _held_locks.get()
 
-        if task is not None and self._owner is task:
+    async def acquire(self) -> None:
+        if self.owned():
             self._depth += 1
             return
 
         await self._lock.acquire()
 
-        self._owner = task
+        _held_locks.set(_held_locks.get() | {self})
         self._depth = 1
 
     def release(self) -> None:
@@ -32,7 +40,7 @@ class RLock:
         self._depth -= 1
 
         if not self._depth:
-            self._owner = None
+            _held_locks.set(_held_locks.get() - {self})
             self._lock.release()
 
     async def __aenter__(self) -> Self:

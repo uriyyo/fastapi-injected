@@ -67,20 +67,41 @@ async def test_rlock_release_without_acquire():
         lock.release()
 
 
-async def test_rlock_is_not_shared_between_tasks():
+async def test_rlock_is_reentrant_in_spawned_tasks():
     lock = RLock()
 
+    # a task spawned by the holder works on its behalf - it inherits the ownership
     async def worker() -> bool:
-        return lock.locked()
+        async with lock:
+            return lock.owned()
 
     async with lock:
-        assert await asyncio.create_task(worker())
+        async with asyncio.timeout(1):
+            assert await asyncio.create_task(worker())
+
+
+async def test_rlock_blocks_tasks_created_outside_the_holder():
+    lock = RLock()
+    acquired = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def worker() -> None:
+        await acquired.wait()
+
+        async with lock:
+            entered.set()
+
+    # the task copies the context before the lock is taken, so it does not own it
+    task = asyncio.create_task(worker())
+    await asyncio.sleep(0)
+
+    async with lock:
+        assert lock.owned()
+        acquired.set()
 
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(0.05):
-                await asyncio.create_task(_acquire(lock))
+                await entered.wait()
 
-
-async def _acquire(lock: RLock) -> None:
-    async with lock:
-        pass
+    await task
+    assert entered.is_set()

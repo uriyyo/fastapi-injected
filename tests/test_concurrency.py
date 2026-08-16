@@ -57,6 +57,20 @@ async def nested_resolve_dep() -> Session:
     return await resolve(SessionDep)
 
 
+async def spawning_dep() -> Session:
+    # resolving from a task the dependency spawned itself must not block on the scope
+    [session] = await asyncio.gather(resolve(SessionDep))
+    return session
+
+
+async def test_nested_resolve_in_spawned_task_does_not_deadlock():
+    async with push_inject_scope():
+        async with asyncio.timeout(5):
+            session = await resolve(spawning_dep)
+
+        assert session is await resolve(SessionDep)
+
+
 async def test_nested_resolve_does_not_deadlock():
     async with push_inject_scope():
         async with asyncio.timeout(5):
