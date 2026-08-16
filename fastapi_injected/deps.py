@@ -18,7 +18,7 @@ from .types import Coro, HasSignature
 
 @runtime_checkable
 class HasDependsHook[**P, R](Protocol):
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Any:
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         pass
 
     def __get_depends__(self) -> params.Depends:

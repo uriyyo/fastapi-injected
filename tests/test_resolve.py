@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 
 import pytest
@@ -31,6 +32,36 @@ async def test_resolve_reuse_cache():
         b2 = await resolve(Bar)
 
         assert b1 is b2
+
+
+def plain_factory() -> Foo:
+    return Foo()
+
+
+async def coro_factory() -> Foo:
+    return Foo()
+
+
+def sync_gen_factory() -> Iterator[Foo]:
+    yield Foo()
+
+
+async def async_gen_factory() -> AsyncIterator[Foo]:
+    yield Foo()
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        Foo,
+        plain_factory,
+        coro_factory,
+        sync_gen_factory,
+        async_gen_factory,
+    ],
+)
+async def test_resolve_factory(factory):
+    assert isinstance(await resolve(factory), Foo)
 
 
 @dataclass(frozen=True)

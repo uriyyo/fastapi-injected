@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from fastapi import Depends, params
 
 from fastapi_injected import Dep, DepFactory, resolve
 
@@ -7,10 +7,12 @@ from .deps import (
     ContextState,
     NonPydanticType,
     TypeOf,
+    coro_ctx_dep,
     ctx_dep,
     get_value,
     is_equivalent_to,
     static_assert,
+    sync_ctx_dep,
 )
 
 
@@ -25,12 +27,24 @@ async def _resolve_a_type() -> None:
 
 
 async def _resolve_a_factory() -> None:
-    # a factory resolves to what it produces
+    # a factory resolves to what it produces, whatever shape it has
     static_assert(is_equivalent_to(TypeOf[await resolve(get_value)], int))
+    static_assert(is_equivalent_to(TypeOf[await resolve(coro_ctx_dep)], ContextState))
+    static_assert(is_equivalent_to(TypeOf[await resolve(sync_ctx_dep)], ContextState))
+    static_assert(is_equivalent_to(TypeOf[await resolve(ctx_dep)], ContextState))
 
-    # for a generator factory both `DepReturn` members match, so the result is widened -
-    # what is resolved at runtime is always the yielded value
-    static_assert(is_equivalent_to(TypeOf[await resolve(ctx_dep)], ContextState | AsyncIterator[ContextState]))
+
+class DependsHook:
+    def __call__(self) -> ContextState:
+        return ContextState()
+
+    def __get_depends__(self) -> params.Depends:
+        return Depends(ContextState)
+
+
+async def _resolve_a_depends_hook() -> None:
+    # an object that brings its own `Depends` resolves to what it produces too
+    static_assert(is_equivalent_to(TypeOf[await resolve(DependsHook())], ContextState))
 
 
 async def _resolve_options() -> None:

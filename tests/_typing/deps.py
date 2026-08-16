@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 
 from ty_extensions import static_assert
@@ -37,6 +37,18 @@ class Container:
     ctx: DepFactory[ContextState, ctx_dep]
 
 
+def sync_ctx_dep() -> Iterator[ContextState]:
+    state = ContextState()
+    try:
+        yield state
+    finally:
+        state.closed = True
+
+
+async def coro_ctx_dep() -> ContextState:
+    return ContextState()
+
+
 def get_value() -> int:
     return 1
 
@@ -53,10 +65,12 @@ __all__ = [
     "ContextState",
     "NonPydanticType",
     "TypeOf",
+    "coro_ctx_dep",
     "ctx_dep",
     "get_value",
     "is_assignable_to",
     "is_equivalent_to",
     "is_subtype_of",
     "static_assert",
+    "sync_ctx_dep",
 ]
