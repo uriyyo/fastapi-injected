@@ -3,6 +3,8 @@ from typing import Annotated, Any, TypeVar, get_args, get_origin
 from fastapi.params import Depends
 from typing_inspection.typing_objects import is_typealiastype
 
+from .types import ArgMarker
+
 
 def unwrap_tp(tp: Any) -> Any:
     # PEP 695 aliases can be nested, e.g. `type A = B` where `type B = Annotated[...]`
@@ -23,6 +25,12 @@ def is_dep(tp: Any) -> bool:
     tp = unwrap_tp(tp)
 
     return any(isinstance(tp, Depends) for tp in _get_annotated_metadata(tp))
+
+
+def is_arg(tp: Any) -> bool:
+    tp = unwrap_tp(tp)
+
+    return any(metadata is ArgMarker for metadata in _get_annotated_metadata(tp))
 
 
 def _enforce_dep(tp: Any) -> Any:
@@ -56,6 +64,7 @@ def unwrap_dep_dependency(obj: Any, /) -> Any:
 
 
 __all__ = [
+    "is_arg",
     "is_dep",
     "unwrap_dep_dependency",
     "unwrap_dep_tp",

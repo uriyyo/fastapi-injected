@@ -19,9 +19,14 @@ else:
     Dep = Annotated[_T, Depends()]
 
 if TYPE_CHECKING:
+    ArgMarker: Any = object()
+else:
+    ArgMarker = sentinel("ArgMarker")
+
+if TYPE_CHECKING:
     type Arg[T] = Annotated[T, ...]
 else:
-    type Arg[T] = Any
+    Arg = Annotated[_T, ArgMarker]
 
 if TYPE_CHECKING:
     from typing import Annotated as DepFactory
@@ -74,6 +79,7 @@ type DepDecl[**P, R] = Callable[P, DepShape[R]]
 
 __all__ = [
     "Arg",
+    "ArgMarker",
     "AsyncDecorator",
     "AsyncFunc",
     "Coro",

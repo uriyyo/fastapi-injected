@@ -1,11 +1,16 @@
-import pytest
-from fastapi.exceptions import FastAPIError
+import inspect
+from typing import Annotated
 
-from fastapi_injected import Arg, Dep, Injected, inject, push_inject_scope
+import pytest
+from fastapi import Depends, Query, Request
+
+from fastapi_injected import Arg, Dep, Injected, NotADependencyError, inject, push_inject_scope
 
 from .deps import Child, Container, ContextState, NonPydanticType
 
 pytestmark = pytest.mark.asyncio
+
+type ChildDep = Annotated[Child, Depends(Child)]
 
 
 async def test_inject():
@@ -71,11 +76,12 @@ async def test_inject_func_with_args():
 
 
 async def test_inject_func_with_non_pydantic_arg():
+    # an argument that is not a dependency is never shown to pydantic, so it needs no marker
     @inject
     async def func(
-        a: Arg[NonPydanticType],
+        a: NonPydanticType,
         *,
-        b: Arg[NonPydanticType],
+        b: NonPydanticType,
         bar: Dep[Container] = Injected,
     ) -> int:
         assert isinstance(bar, Container)
@@ -86,16 +92,75 @@ async def test_inject_func_with_non_pydantic_arg():
     assert result == 3
 
 
-async def test_inject_func_with_non_pydantic_arg_without_arg_helper():
-    with pytest.raises(FastAPIError, match="Invalid args for response field"):
+async def test_arg_opts_a_dependency_out_of_the_graph():
+    @inject
+    async def func(
+        child: Arg[Dep[Child]],
+        *,
+        bar: Dep[Container] = Injected,
+    ) -> Child:
+        assert isinstance(bar, Container)
+
+        return child
+
+    passed = Child()
+    assert await func(passed) is passed
+
+
+async def test_arg_leaves_the_parameter_in_the_public_signature():
+    @inject
+    async def func(
+        child: Arg[Dep[Child]],
+        *,
+        bar: Dep[Container] = Injected,
+    ) -> None:
+        pass
+
+    assert [*inspect.signature(func).parameters] == ["child"]
+
+
+async def test_a_dependency_passed_as_a_default_is_injected():
+    @inject
+    async def func(child: Child = Depends(Child)) -> Child:  # noqa: B008 - the spelling under test
+        return child
+
+    assert isinstance(await func(), Child)
+
+
+async def test_a_dependency_written_as_an_alias_is_injected():
+    @inject
+    async def func(child: ChildDep = Injected) -> Child:
+        return child
+
+    assert isinstance(await func(), Child)
+
+
+async def test_fastapi_parameters_stay_caller_supplied():
+    # `@inject` resolves dependencies, not request parameters - those are still the caller's
+    @inject
+    async def func(
+        request: Request,
+        page: Annotated[int, Query()],
+        *,
+        bar: Dep[Container] = Injected,
+    ) -> str:
+        assert isinstance(bar, Container)
+
+        return f"{request}:{page}"
+
+    assert [*inspect.signature(func).parameters] == ["request", "page"]
+    assert await func("request", 1) == "request:1"
+
+
+async def test_injected_default_without_a_dependency_is_a_mistake():
+    with pytest.raises(NotADependencyError, match="'child'"):
 
         @inject
         async def func(
-            a: NonPydanticType,
             *,
-            bar: Dep[Container] = Injected,
-        ) -> int:
-            return a.value
+            child: Child = Injected,
+        ) -> None:
+            pass
 
 
 async def test_inject_teardown():

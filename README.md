@@ -56,7 +56,7 @@ await handler()
 
 - `Dep[T]` — resolve `T` by calling it, same as FastAPI's `Annotated[T, Depends()]`.
 - `DepFactory[T, factory]` — resolve `T` via a factory, same as `Annotated[T, Depends(factory)]`. Generator factories get proper teardown.
-- `Arg[T]` — mark a parameter as a plain caller-supplied argument, for types pydantic cannot validate. See [Non-pydantic arguments](#non-pydantic-arguments).
+- `Arg[T]` — keep a parameter out of the dependency graph even though its annotation is a dependency, so the caller supplies it. See [Caller-supplied arguments](#caller-supplied-arguments).
 - `Injected` — a sentinel default that exists purely to make type checkers happy: without it they would complain about a missing argument at call sites. At runtime the parameter is always filled in by `@inject`.
 
 Injected parameters mix freely with regular ones — pass your own arguments as usual and the rest is injected:
@@ -70,35 +70,42 @@ async def add(a: int, b: int, *, service: Dep[Service] = Injected) -> int:
 result = await add(1, 2)
 ```
 
-### Non-pydantic arguments
+### Caller-supplied arguments
 
-Regular parameters still go through FastAPI's parameter analysis, so their annotations have to be valid pydantic field types. A plain class that pydantic cannot handle makes `@inject` fail at decoration time:
+A parameter is injected only if it is written as a dependency — `Dep[...]`, `DepFactory[...]`, an `Annotated[..., Depends(...)]` of your own, or a `Depends(...)` default. Everything else is left for the caller, annotation untouched: it is never handed to pydantic, so any type works with no marker at all.
 
 ```python
-class Connection:  # not a pydantic-friendly type
+class Connection:  # not a pydantic-friendly type, and it does not have to be
     ...
 
 
 @inject
 async def handler(conn: Connection, *, service: Dep[Service] = Injected) -> None:
-    ...  # FastAPIError: Invalid args for response field!
-```
-
-Wrap such parameters in `Arg[...]` to hide them from that analysis:
-
-```python
-from fastapi_injected import Arg
-
-
-@inject
-async def handler(conn: Arg[Connection], *, service: Dep[Service] = Injected) -> None:
     ...
 
 
 await handler(connection)
 ```
 
-`Arg[T]` is a no-op for type checkers — the parameter stays typed as `T` — and at runtime it only tells `@inject` that this argument comes from the caller, not from the dependency graph. It is needed only for annotations pydantic rejects; ordinary types work without it.
+`Arg[...]` is for the opposite case — a parameter that *is* spelled as a dependency, in a function that wants it passed in instead:
+
+```python
+from fastapi_injected import Arg
+
+type ServiceDep = Annotated[Service, Depends(get_service)]
+
+
+@inject
+async def handler(service: Arg[ServiceDep], *, session: Dep[Session] = Injected) -> None:
+    ...
+
+
+await handler(service)
+```
+
+`Arg[T]` is a no-op for type checkers — the parameter stays typed as `T` — and at runtime it tells `@inject` to keep this parameter out of the dependency graph.
+
+Writing `Injected` as the default of a parameter that is not a dependency raises `NotADependencyError` at decoration time, since nothing would ever fill it in.
 
 ### Resolving a type directly
 
@@ -332,9 +339,9 @@ Everything the package supports is importable from `fastapi_injected` itself, an
 | Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
 | Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
 | Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `push_overrides`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
-| Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency` |
+| Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency` |
 | FastAPI integration | `add_injected_scope`, `init_inject_scope` |
-| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `UnboundDepArgsError`, `UnboundScopeError` |
+| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundScopeError` |
 
 `fastapi_injected.types` holds the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro` and friends — and is public too. Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
 

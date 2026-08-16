@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi.exceptions import RequestValidationError
 
-from fastapi_injected import DependencyResolutionError
+from fastapi_injected import DependencyResolutionError, NotADependencyError
 
 from .deps import (
     TypeOf,
@@ -13,6 +13,9 @@ from .deps import (
 
 # catching it as what resolution used to raise keeps working
 static_assert(is_subtype_of(DependencyResolutionError, ValueError))
+
+# a parameter that cannot be injected is a mistake in how it was written, not a runtime failure
+static_assert(is_subtype_of(NotADependencyError, TypeError))
 
 
 def _errors(error: DependencyResolutionError) -> None:

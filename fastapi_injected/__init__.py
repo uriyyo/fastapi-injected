@@ -1,6 +1,6 @@
 from ._bind import UnboundDepArgsError, bind_deps, remap_dep_args, signature_with_deps
 from ._dataclass import MakeDataclass
-from ._deps_tp import is_dep, unwrap_dep_dependency, unwrap_dep_tp
+from ._deps_tp import is_arg, is_dep, unwrap_dep_dependency, unwrap_dep_tp
 from ._fastapi_lifecycle import MissingDependencyCacheError, add_injected_scope, init_inject_scope
 from ._given import Given
 from ._injected import MakeInjected
@@ -14,10 +14,12 @@ from .inject import inject
 from .overrides import FactoryOverride, Overrides, OverridesProvider, ValueOverride, push_overrides
 from .resolve import resolve
 from .scope import InjectScope, UnboundScopeError, inside_inject_scope, push_inject_scope
-from .types import Arg, Dep, DepFactory, DepOf, Injected
+from .sign import NotADependencyError
+from .types import Arg, ArgMarker, Dep, DepFactory, DepOf, Injected
 
 __all__ = [
     "Arg",
+    "ArgMarker",
     "Dep",
     "DepFactory",
     "DepOf",
@@ -31,6 +33,7 @@ __all__ = [
     "MakeInjected",
     "MissedDependencyError",
     "MissingDependencyCacheError",
+    "NotADependencyError",
     "Overrides",
     "OverridesProvider",
     "UnboundDepArgsError",
@@ -42,6 +45,7 @@ __all__ = [
     "init_inject_scope",
     "inject",
     "inside_inject_scope",
+    "is_arg",
     "is_dep",
     "push_inject_scope",
     "push_overrides",
