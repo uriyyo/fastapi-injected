@@ -7,11 +7,27 @@ from typing import Annotated, Any, Literal, Protocol, cast, overload, runtime_ch
 from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
+from fastapi.exceptions import RequestValidationError
 
 from ._deps_tp import is_dep, unwrap_tp
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
 from .types import Coro, DependencyCache, HasSignature
+
+
+class DependencyResolutionError(ValueError):
+    def __init__(self, errors: list[Any], /) -> None:
+        super().__init__(errors)
+        self.errors = errors
+
+    def as_validation_error(self) -> RequestValidationError:
+        return RequestValidationError(self.errors)
+
+
+class MissedDependencyError(ValueError):
+    def __init__(self, name: str, /) -> None:
+        super().__init__(f"dependency {name!r} is not available")
+        self.name = name
 
 
 @runtime_checkable
@@ -111,18 +127,20 @@ async def resolve_dependencies(
         )
 
     if solved.errors:
-        raise ValueError(solved.errors)
+        raise DependencyResolutionError(solved.errors)
 
     if single:
         try:
             return solved.values["__value__"]
         except KeyError:
-            raise ValueError("No single dependency found") from None
+            raise MissedDependencyError("__value__") from None
 
     return solved.values
 
 
 __all__ = [
+    "DependencyResolutionError",
+    "MissedDependencyError",
     "create_dependant",
     "resolve_dependencies",
 ]

@@ -223,6 +223,22 @@ class Config(MakeDataclass, frozen=True, kw_only=True):
     retries: int = 3
 ```
 
+### When resolution fails
+
+A dependency can fail to resolve for the same reasons it would in a route — a missing header, a query parameter that does not validate. `DependencyResolutionError` carries those errors in the shape pydantic produced them, and turns into the response FastAPI would have returned:
+
+```python
+from fastapi_injected import DependencyResolutionError
+
+try:
+    await handler()
+except DependencyResolutionError as exc:
+    exc.errors  # [{'type': 'missing', 'loc': ('header', 'x-trace'), ...}]
+    raise exc.as_validation_error() from exc  # a RequestValidationError, so a 422
+```
+
+It is a `ValueError`, which is what resolution used to raise, so code catching that keeps working.
+
 ### Inspecting annotations
 
 A few helpers are exported for code that needs to reason about `Dep[...]` annotations — building override maps, custom decorators, and the like:
