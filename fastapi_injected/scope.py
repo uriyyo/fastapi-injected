@@ -271,4 +271,5 @@ __all__ = [
     "InjectScope",
     "UnboundScopeError",
     "inside_inject_scope",
+    "push_inject_scope",
 ]

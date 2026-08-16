@@ -74,6 +74,7 @@ def add_injected_scope(
 
 
 __all__ = [
+    "MissingDependencyCacheError",
     "add_injected_scope",
     "init_inject_scope",
 ]

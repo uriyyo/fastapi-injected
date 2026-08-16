@@ -323,6 +323,21 @@ async def route(service: Dep[Service]) -> str:
 
 Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request.
 
+## What is public
+
+Everything the package supports is importable from `fastapi_injected` itself, and that is the surface a release keeps:
+
+| | |
+| --- | --- |
+| Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
+| Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
+| Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `push_overrides`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
+| Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency` |
+| FastAPI integration | `add_injected_scope`, `init_inject_scope` |
+| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `UnboundDepArgsError`, `UnboundScopeError` |
+
+`fastapi_injected.types` holds the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro` and friends — and is public too. Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
+
 ## License
 
 MIT

@@ -147,8 +147,10 @@ async def resolve_dependencies(
 
 __all__ = [
     "DependencyResolutionError",
+    "HasDependsHook",
     "MissedDependencyError",
     "clear_dependant_cache",
     "create_dependant",
+    "create_single_dependant",
     "resolve_dependencies",
 ]
