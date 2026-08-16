@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, Header, Request, status
 from fastapi.testclient import TestClient
 
 from fastapi_injected import Dep, Injected, init_inject_scope, inject, push_inject_scope, resolve
@@ -176,3 +176,38 @@ def test_app_dependency_overrides_are_used() -> None:
         overridden_app.dependency_overrides.clear()
 
     assert result.status_code == status.HTTP_200_OK
+
+
+async def _header_dep(x_trace: Annotated[str, Header()] = "missing") -> str:
+    return x_trace
+
+
+type Trace = Annotated[str, Depends(_header_dep)]
+
+
+@inject(new_scope=True)
+async def _in_new_scope(
+    *,
+    container: Dep[Container] = Injected,
+    trace: Trace = Injected,
+) -> tuple[Container, str]:
+    return container, trace
+
+
+@app.get("/new-scope")
+async def new_scope_route(container: Dep[Container], trace: Trace) -> dict[str, bool]:
+    fresh, fresh_trace = await _in_new_scope()
+
+    return {
+        # a new scope builds its dependencies again ...
+        "is_fresh": fresh is not container,
+        # ... without leaving the request they are built for
+        "keeps_request": fresh_trace == trace,
+    }
+
+
+def test_new_scope_is_fresh_and_keeps_the_request() -> None:
+    result = client.get("/new-scope", headers={"x-trace": "sent"})
+
+    assert result.status_code == status.HTTP_200_OK
+    assert result.json() == {"is_fresh": True, "keeps_request": True}

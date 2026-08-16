@@ -10,7 +10,7 @@ from contextvars import ContextVar
 from dataclasses import field, replace
 from typing import Any, Self, cast
 
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, APIWebSocketRoute
 from starlette.types import Message, Scope
@@ -30,18 +30,37 @@ class UnboundScopeError(Exception):
 _SYNTHETIC_REQUEST_KEY = "__fastapi_injected_synthetic_request__"
 
 
+class _SyntheticScope(dict[str, Any]):
+    def __missing__(self, key: str) -> Any:
+        raise KeyError(
+            f"{key!r} is not part of a synthetic request - "
+            f"pass request= (or app=) to push_inject_scope() to resolve against a real one",
+        )
+
+
 def _dummy_scope() -> Scope:
-    return {
-        "type": "http",
-        "http_version": "1.1",
-        "query_string": b"",
-        "headers": [],
-        _SYNTHETIC_REQUEST_KEY: True,
-    }
+    return _SyntheticScope(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "server": None,
+            "client": None,
+            "root_path": "",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "headers": [],
+            "path_params": {},
+            _SYNTHETIC_REQUEST_KEY: True,
+        },
+    )
 
 
 def _dummy_request(
     *,
+    app: FastAPI | None = None,
     extra_scope: Scope | None = None,
 ) -> Request:
     async def _dummy_receive() -> Message:
@@ -54,6 +73,10 @@ def _dummy_request(
         pass
 
     scope = _dummy_scope()
+
+    if app is not None:
+        scope["app"] = app
+
     if extra_scope:
         scope.update(extra_scope)
 
@@ -85,6 +108,7 @@ class InjectScope(MakeDataclass):
 
     parent: Self | None = field(default=None, repr=False)
     overrides: MutableMapping[Any, Any] = field(default_factory=dict, repr=False)
+    inherit_cache: bool = field(default=False, repr=False)
     lock: RLock = field(default_factory=RLock, repr=False)
 
     @classmethod
@@ -130,16 +154,21 @@ class InjectScope(MakeDataclass):
 
         return bool(self.request.scope.get(_SYNTHETIC_REQUEST_KEY, False))
 
+    @property
+    def cache_scopes(self) -> Iterator[Self]:
+        scope = self
+
+        while scope.inherit_cache and scope.parent is not None:
+            scope = scope.parent
+            yield scope
+
     def cache_for(self, dependant: Dependant, /) -> ScopeCache:
         fallbacks = []
         introduced: set[Any] = set(self.overrides)
 
         # an outer scope resolved under the overrides it could see, so only the ones
         # pushed after it invalidate what it has cached
-        for scope in self.scopes:
-            if scope is self:
-                continue
-
+        for scope in self.cache_scopes:
             fallbacks.append((scope.dependency_cache, overridden_calls(dependant, introduced)))
             introduced |= set(scope.overrides)
 
@@ -157,6 +186,7 @@ class InjectScope(MakeDataclass):
                 self,
                 parent=self,
                 dependency_cache={},
+                inherit_cache=True,
                 overrides=normalize_overrides(overrides, provider=provider),
             ),
         )
@@ -185,10 +215,18 @@ async def push_inject_scope(
     *,
     dependency_cache: DependencyCache | None = None,
     request: Request | None = None,
+    app: FastAPI | None = None,
     provider: HasDependencyOverrides | None = None,
 ) -> AsyncIterator[InjectScope]:
     if dependency_cache is None:
         dependency_cache = {}
+
+    parent = InjectScope.current()
+
+    # a scope of its own is about building dependencies again, not about leaving the
+    # request they are built for
+    if request is None and parent is not None:
+        request = parent.request
 
     async with AsyncExitStack() as stack:
         extra_scope: Scope = {
@@ -199,13 +237,13 @@ async def push_inject_scope(
         request = (
             _rebind_request(request, extra_scope=extra_scope)
             if request is not None
-            else _dummy_request(extra_scope=extra_scope)
+            else _dummy_request(app=app, extra_scope=extra_scope)
         )
 
         scope = InjectScope(
             dependency_cache,
             request,
-            parent=InjectScope.current(),
+            parent=parent,
             overrides=normalize_overrides(overrides, provider=provider),
         )
 

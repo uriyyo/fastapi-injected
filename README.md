@@ -125,7 +125,16 @@ async with push_inject_scope():
 # generator dependencies are torn down here
 ```
 
-Use `@inject(new_scope=True)` to opt a function out of the surrounding scope and always get fresh dependencies.
+Use `@inject(new_scope=True)` to opt a function out of the surrounding scope and always get fresh dependencies. It builds them again, but stays in the request they are being built for, so request-bound dependencies keep resolving.
+
+Outside of a request there is no request to resolve against, so the scope makes one up. It answers what a dependency usually reads — `method`, `url`, `headers`, `path_params`, `client`, `state` — with the values of a request nobody sent. The application is the one thing it cannot invent: pass it when a dependency reaches for `request.app`:
+
+```python
+async with push_inject_scope(app=app):
+    await handler()  # `request.app.state` resolves as it does in a route
+```
+
+Without it, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
 
 ### Overriding dependencies
 
