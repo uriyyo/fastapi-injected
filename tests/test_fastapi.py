@@ -1,7 +1,10 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, Request, status
+import pytest
+from fastapi import Depends, FastAPI, Header, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.testclient import TestClient
+from starlette.requests import HTTPConnection
+from starlette.websockets import WebSocketState
 
 from fastapi_injected import Dep, Injected, init_inject_scope, inject, push_inject_scope, resolve
 from fastapi_injected._fastapi_lifecycle import add_injected_scope
@@ -178,6 +181,23 @@ def test_app_dependency_overrides_are_used() -> None:
     assert result.status_code == status.HTTP_200_OK
 
 
+@overridden_app.websocket("/ws")
+async def overridden_ws_route(websocket: WebSocket, child: Dep[Child]) -> None:
+    await websocket.accept()
+    await websocket.send_json({"overridden": child is _overridden_child and await resolve(Child) is child})
+    await websocket.close()
+
+
+def test_app_dependency_overrides_are_used_in_websocket() -> None:
+    overridden_app.dependency_overrides[Child] = _override_child
+
+    try:
+        with overridden_client.websocket_connect("/ws") as ws:
+            assert ws.receive_json() == {"overridden": True}
+    finally:
+        overridden_app.dependency_overrides.clear()
+
+
 async def _header_dep(x_trace: Annotated[str, Header()] = "missing") -> str:
     return x_trace
 
@@ -211,3 +231,150 @@ def test_new_scope_is_fresh_and_keeps_the_request() -> None:
 
     assert result.status_code == status.HTTP_200_OK
     assert result.json() == {"is_fresh": True, "keeps_request": True}
+
+
+@inject
+async def _ws_func(
+    *,
+    container: Dep[Container] = Injected,
+) -> Container:
+    return container
+
+
+@app.websocket("/ws")
+async def ws_route(websocket: WebSocket, container: Dep[Container]) -> None:
+    await websocket.accept()
+
+    same = await resolve(Container) is container and await _ws_func() is container
+
+    await websocket.send_json({"same": same})
+    await websocket.close()
+
+
+def test_websocket_cache_is_working() -> None:
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json() == {"same": True}
+
+
+@app.websocket("/ws/items/{item_id}")
+async def ws_item_route(websocket: WebSocket, item_id: ItemID) -> None:
+    await websocket.accept()
+    await websocket.send_json({"item_id": await resolve(ItemID) == item_id, "value": item_id})
+    await websocket.close()
+
+
+def test_websocket_resolve_uses_route_path() -> None:
+    with client.websocket_connect("/ws/items/42") as ws:
+        assert ws.receive_json() == {"item_id": True, "value": 42}
+
+
+async def _ws_dep(websocket: WebSocket) -> WebSocket:
+    return websocket
+
+
+async def _connection_dep(connection: HTTPConnection) -> HTTPConnection:
+    return connection
+
+
+type WS = Annotated[WebSocket, Depends(_ws_dep)]
+type Connection = Annotated[HTTPConnection, Depends(_connection_dep)]
+
+
+@app.websocket("/ws/send")
+async def ws_send_route(websocket: WebSocket) -> None:
+    await websocket.accept()
+
+    scope = InjectScope.current()
+    assert scope is not None
+    assert scope.request is not websocket
+
+    async with push_inject_scope(request=websocket) as nested:
+        assert nested.request is not websocket
+        assert not nested.synthetic
+
+        resolved = await resolve(WS)
+        connection = await resolve(Connection)
+
+        assert isinstance(connection, WebSocket)
+        assert resolved.scope["path"] == websocket.scope["path"]
+
+        await resolved.send_json({"from": "dependency"})
+
+    await websocket.send_json({"from": "route"})
+    await websocket.close()
+
+
+def test_websocket_dependency_shares_the_handshake() -> None:
+    with client.websocket_connect("/ws/send") as ws:
+        assert ws.receive_json() == {"from": "dependency"}
+        assert ws.receive_json() == {"from": "route"}
+
+
+@app.websocket("/ws/close")
+async def ws_close_route(websocket: WebSocket) -> None:
+    await websocket.accept()
+
+    resolved = await resolve(WS)
+    await resolved.close()
+
+    # closing through the bound websocket closed the one the route holds too
+    assert websocket.application_state is WebSocketState.DISCONNECTED
+
+
+def test_websocket_close_through_dependency_is_seen_by_the_route() -> None:
+    with client.websocket_connect("/ws/close") as ws, pytest.raises(WebSocketDisconnect):
+        ws.receive_json()
+
+
+@app.websocket("/ws/state")
+async def ws_state_route(websocket: WebSocket) -> None:
+    await websocket.accept()
+    websocket.state.value = 42
+
+    async with push_inject_scope(request=websocket) as scope:
+        assert scope.request.state.value == 42
+        scope.request.state.value = 43
+
+    await websocket.send_json({"value": websocket.state.value})
+    await websocket.close()
+
+
+def test_websocket_nested_scope_shares_state() -> None:
+    with client.websocket_connect("/ws/state") as ws:
+        assert ws.receive_json() == {"value": 43}
+
+
+_ws_states: list[ContextState] = []
+
+
+@app.websocket("/ws/teardown")
+async def ws_teardown_route(websocket: WebSocket) -> None:
+    await websocket.accept()
+
+    _ws_states.append(await resolve(ctx_dep))
+    await websocket.send_json({"closed": _ws_states[-1].closed})
+    await websocket.close()
+
+
+def test_websocket_dependencies_are_torn_down_with_the_connection() -> None:
+    _ws_states.clear()
+
+    with client.websocket_connect("/ws/teardown") as ws:
+        assert ws.receive_json() == {"closed": False}
+
+    assert [state.closed for state in _ws_states] == [True]
+
+
+@app.websocket("/ws/new-scope")
+async def ws_new_scope_route(websocket: WebSocket, container: Dep[Container]) -> None:
+    await websocket.accept()
+
+    fresh, _ = await _in_new_scope()
+
+    await websocket.send_json({"is_fresh": fresh is not container})
+    await websocket.close()
+
+
+def test_websocket_new_scope_is_fresh() -> None:
+    with client.websocket_connect("/ws/new-scope") as ws:
+        assert ws.receive_json() == {"is_fresh": True}

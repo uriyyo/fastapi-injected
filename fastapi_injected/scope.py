@@ -10,16 +10,18 @@ from contextvars import ContextVar
 from dataclasses import field, replace
 from typing import Any, Self, cast
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, APIWebSocketRoute
+from starlette.requests import HTTPConnection
 from starlette.types import Message, Scope
+from starlette.websockets import WebSocketState
 
 from ._cache import ScopeCache, overridden_calls
 from ._dataclass import MakeDataclass
 from ._overrides import Overrides, normalize_overrides
 from ._rlock import RLock
-from .types import DependencyCache, HasDependencyOverrides
+from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 
 class UnboundScopeError(Exception):
@@ -87,13 +89,41 @@ def _dummy_request(
     )
 
 
+class _ReboundWebSocket(WebSocket):
+    def __init__(self, origin: WebSocket, /, *, scope: Scope) -> None:
+        HTTPConnection.__init__(self, scope)
+
+        self._origin = origin
+        self._receive = origin._receive  # noqa: SLF001
+        self._send = origin._send  # noqa: SLF001
+
+    @property
+    def client_state(self) -> WebSocketState:
+        return self._origin.client_state
+
+    @client_state.setter
+    def client_state(self, state: WebSocketState) -> None:
+        self._origin.client_state = state
+
+    @property
+    def application_state(self) -> WebSocketState:
+        return self._origin.application_state
+
+    @application_state.setter
+    def application_state(self, state: WebSocketState) -> None:
+        self._origin.application_state = state
+
+
 def _rebind_request(
-    request: Request,
+    request: BoundConnection,
     /,
     *,
     extra_scope: Scope,
-) -> Request:
+) -> BoundConnection:
     scope = {**request.scope, **extra_scope}
+
+    if isinstance(request, WebSocket):
+        return _ReboundWebSocket(request, scope=scope)
 
     return Request(
         scope,
@@ -104,7 +134,7 @@ def _rebind_request(
 
 class InjectScope(MakeDataclass):
     dependency_cache: DependencyCache = field(default_factory=dict)
-    request: Request | None = None
+    request: BoundConnection | None = None
 
     parent: Self | None = field(default=None, repr=False)
     overrides: MutableMapping[Any, Any] = field(default_factory=dict, repr=False)
@@ -120,7 +150,7 @@ class InjectScope(MakeDataclass):
         return self.request is not None
 
     @property
-    def bound_request(self) -> Request:
+    def bound_request(self) -> BoundConnection:
         if self.request is None:
             raise UnboundScopeError
 
@@ -214,7 +244,7 @@ async def push_inject_scope(
     /,
     *,
     dependency_cache: DependencyCache | None = None,
-    request: Request | None = None,
+    request: BoundConnection | None = None,
     app: FastAPI | None = None,
     provider: HasDependencyOverrides | None = None,
 ) -> AsyncIterator[InjectScope]:
