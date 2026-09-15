@@ -1,11 +1,11 @@
 from collections.abc import MutableMapping
 from typing import Any
 
-from fastapi import Request
+from fastapi import Request, WebSocket
 
 from fastapi_injected import push_inject_scope
 from fastapi_injected.scope import InjectScope, inside_inject_scope
-from fastapi_injected.types import DependencyCache
+from fastapi_injected.types import BoundConnection, DependencyCache
 
 from .deps import (
     TypeOf,
@@ -19,8 +19,9 @@ async def _scope() -> None:
         static_assert(is_equivalent_to(TypeOf[scope], InjectScope))
         static_assert(is_equivalent_to(TypeOf[scope.dependency_cache], DependencyCache))
         # a scope pushed by `push_inject_scope` is always bound, but the field is optional
-        static_assert(is_equivalent_to(TypeOf[scope.request], Request | None))
-        static_assert(is_equivalent_to(TypeOf[scope.bound_request], Request))
+        static_assert(is_equivalent_to(TypeOf[scope.request], BoundConnection | None))
+        static_assert(is_equivalent_to(TypeOf[scope.bound_request], BoundConnection))
+        static_assert(is_equivalent_to(TypeOf[scope.bound_request], Request | WebSocket))
         static_assert(is_equivalent_to(TypeOf[scope.bound], bool))
         static_assert(is_equivalent_to(TypeOf[scope.path_format], str | None))
         static_assert(is_equivalent_to(TypeOf[scope.synthetic], bool))
@@ -42,6 +43,15 @@ async def _scope() -> None:
             static_assert(is_equivalent_to(TypeOf[nested], InjectScope))
 
 
+async def _bound_to(request: Request, websocket: WebSocket) -> None:
+    # a scope is bound to whichever the route has - a request or a websocket
+    async with push_inject_scope(request=request):
+        pass
+
+    async with push_inject_scope(request=websocket):
+        pass
+
+
 def _current_scope() -> None:
     # outside of any scope there is none, so the result is optional
     static_assert(is_equivalent_to(TypeOf[InjectScope.current()], InjectScope | None))
@@ -52,3 +62,6 @@ async def _negatives() -> None:
         pass
 
     _ = InjectScope.current().dependency_cache  # type: ignore[ty:unresolved-attribute]
+
+    async with push_inject_scope(request=object()):  # type: ignore[ty:invalid-argument-type]
+        pass

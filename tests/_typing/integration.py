@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, WebSocket
 
 from fastapi_injected import Dep, add_injected_scope, init_inject_scope
 
@@ -17,8 +17,9 @@ app = FastAPI(dependencies=[Depends(init_inject_scope)])
 static_assert(is_equivalent_to(TypeOf[add_injected_scope(app)], None))
 
 
-def _init_scope_is_a_generator_dependency(request: Request) -> None:
+def _init_scope_is_a_generator_dependency(request: Request, websocket: WebSocket) -> None:
     static_assert(is_equivalent_to(TypeOf[init_inject_scope(request)], AsyncGenerator[None]))
+    static_assert(is_equivalent_to(TypeOf[init_inject_scope(websocket)], AsyncGenerator[None]))
 
 
 @app.get("/")

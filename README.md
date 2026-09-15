@@ -330,6 +330,21 @@ async def route(service: Dep[Service]) -> str:
 
 Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request.
 
+WebSocket routes work the same way: the scope is bound to the `WebSocket` instead of a `Request`, and dependencies that ask for one get it. A websocket handed to a dependency shares its handshake with the one the route received, so it can be talked through after the route has called `accept()`:
+
+```python
+async def notify(websocket: WebSocket) -> None:
+    await websocket.send_json({"ready": True})
+
+
+@app.websocket("/ws")
+async def ws_route(websocket: WebSocket, service: Dep[Service]) -> None:
+    await websocket.accept()
+    await resolve(notify)  # sends through the connection the route accepted
+```
+
+`push_inject_scope(request=...)` accepts either a `Request` or a `WebSocket`, and so does everything that reads `InjectScope.request` — the union is `fastapi_injected.types.BoundConnection`.
+
 ## What is public
 
 Everything the package supports is importable from `fastapi_injected` itself, and that is the surface a release keeps:
