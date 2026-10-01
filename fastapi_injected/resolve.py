@@ -3,7 +3,7 @@ from typing import Any, overload
 
 from typing_extensions import TypeForm
 
-from .deps import HasDependsHook, create_single_dependant, resolve_dependencies
+from .deps import HasDependsHook, resolve_dependencies, single_dependant
 from .scope import inside_inject_scope
 from .types import DepDecl, DepShape
 
@@ -50,16 +50,12 @@ async def resolve(
     async with inside_inject_scope(
         new_scope=new_scope,
     ) as inject_scope:
-        dependant = create_single_dependant(
-            tp,
-            path=inject_scope.path_format,
-        )
-
-        return await resolve_dependencies(
-            dependant,
-            inject_scope,
-            single=True,
-        )
+        with single_dependant(tp, path=inject_scope.path_format) as dependant:
+            return await resolve_dependencies(
+                dependant,
+                inject_scope,
+                single=True,
+            )
 
 
 __all__ = [

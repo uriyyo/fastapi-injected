@@ -1,14 +1,15 @@
 import inspect
-from collections.abc import Callable
-from contextlib import AsyncExitStack
+from collections.abc import Callable, Iterator
+from contextlib import AsyncExitStack, contextmanager
 from functools import lru_cache, wraps
-from typing import Annotated, Any, Literal, Protocol, cast, overload, runtime_checkable
+from typing import Any, Literal, Protocol, cast, overload, runtime_checkable
 
 from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 from fastapi.exceptions import RequestValidationError
 
+from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation, release
 from ._deps_tp import is_dep, unwrap_tp
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
@@ -55,25 +56,41 @@ def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
     )
 
 
-def create_single_dependant[**P, R](
+@contextmanager
+def single_dependant[**P, R](
     func: Callable[P, R] | HasDependsHook[P, R],
     /,
     *,
     path: str | None = None,
-) -> Dependant:
+) -> Iterator[Dependant]:
     match func:
         case _ if is_dep(func):
             annotation = unwrap_tp(func)
         case HasDependsHook():
-            annotation = Annotated[Any, func.__get_depends__()]
+            annotation = annotated(Any, func.__get_depends__())
         case _:
-            annotation = Annotated[Any, Depends(func)]
+            annotation = annotated(Any, Depends(func))
 
-    return _create_annotation_dependant(annotation, path=path)
+    if is_static_annotation(annotation):
+        yield _create_annotation_dependant(annotation, path=path)
+        return
+
+    # a dependency made at runtime is analysed again on every resolve, and FastAPI only
+    # ever sees its calls behind proxies released here - caching either would keep
+    # whatever it carries alive past the request
+    proxies: list[CallProxy] = []
+    dependant = get_dependant(
+        path=path or "",
+        call=CallProxy(_value_factory(annotation), proxies),
+    )
+
+    try:
+        yield dependant
+    finally:
+        release(proxies)
 
 
-@lru_cache(maxsize=1024)
-def _create_annotation_dependant(annotation: Any, /, *, path: str | None = None) -> Dependant:
+def _value_factory(annotation: Any, /) -> Callable[..., Coro[Any]]:
     async def _factory(__value__: Any) -> Any:
         return __value__
 
@@ -88,9 +105,14 @@ def _create_annotation_dependant(annotation: Any, /, *, path: str | None = None)
         return_annotation=Any,
     )
 
+    return _factory
+
+
+@lru_cache(maxsize=1024)
+def _create_annotation_dependant(annotation: Any, /, *, path: str | None = None) -> Dependant:
     return get_dependant(
         path=path or "",
-        call=_factory,
+        call=_value_factory(annotation),
     )
 
 
@@ -122,16 +144,21 @@ async def resolve_dependencies(
     *,
     single: bool = False,
 ) -> dict[str, Any]:
-    async with scope.lock:
-        solved = await solve_dependencies(
-            request=scope.bound_request,
-            dependant=dependant,
-            dependency_cache=cast("DependencyCache", scope.cache_for(dependant)),
-            dependency_overrides_provider=scope,
-            # this parameter is deprecated and not used
-            async_exit_stack=cast(AsyncExitStack, None),
-            embed_body_fields=False,
-        )
+    proxies: list[CallProxy] = []
+
+    try:
+        async with scope.lock:
+            solved = await solve_dependencies(
+                request=scope.bound_request,
+                dependant=dependant,
+                dependency_cache=cast("DependencyCache", scope.cache_for(dependant)),
+                dependency_overrides_provider=DetachedOverrides(scope.dependency_overrides, proxies),
+                # this parameter is deprecated and not used
+                async_exit_stack=cast(AsyncExitStack, None),
+                embed_body_fields=False,
+            )
+    finally:
+        release(proxies)
 
     if solved.errors:
         raise DependencyResolutionError(solved.errors)
@@ -151,6 +178,6 @@ __all__ = [
     "MissedDependencyError",
     "clear_dependant_cache",
     "create_dependant",
-    "create_single_dependant",
     "resolve_dependencies",
+    "single_dependant",
 ]

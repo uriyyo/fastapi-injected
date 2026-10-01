@@ -6,6 +6,7 @@ from typing import Annotated, Any, Concatenate, get_origin, overload
 from fastapi.dependencies.utils import get_typed_signature
 from fastapi.params import Depends
 
+from ._calls import annotated
 from ._deps_tp import unwrap_tp
 from .sign import update_func_sign
 from .types import AsyncFunc, DepOf, Func
@@ -39,12 +40,12 @@ def _is_annotation(tp: Any, /) -> bool:
 
 def _dep_annotation(dep: DepOf[Any] | Callable[..., Any], /) -> Any:
     if isinstance(dep, Depends):
-        return Annotated[Any, dep]
+        return annotated(Any, dep)
 
     if _is_annotation(dep) or not callable(dep):
         return dep
 
-    return Annotated[Any, Depends(dep)]
+    return annotated(Any, Depends(dep))
 
 
 def signature_with_deps(

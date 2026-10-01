@@ -143,7 +143,7 @@ async with push_inject_scope(app=app):
 
 Without it, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
 
-Analysing a dependency is the expensive part of resolving one, so the result is cached — keyed by the dependency itself, not by whatever object carried it, so nothing that only passed through is kept alive. `clear_dependant_cache()` drops it, for long-lived processes and test suites that want the memory back.
+Analysing a dependency is the expensive part of resolving one, so the result is cached — keyed by the dependency itself, not by whatever object carried it, so nothing that only passed through is kept alive. Only dependencies written in source code are cached this way: functions and classes, and annotations built from them. One made at runtime — `Given(...)`, a `MakeInjected` or `bind_deps` result, an object that brings its own `Depends` — is analysed again on every resolve, and FastAPI never gets to keep it: what it carries is released with the resolve instead of living as long as the process. `clear_dependant_cache()` drops the cache, for long-lived processes and test suites that want the memory back.
 
 ### Overriding dependencies
 
@@ -206,7 +206,7 @@ async with push_inject_scope({Session: fake}) as scope:
 
 ### Dependencies that are objects
 
-Dependants are cached by the callable that resolves them, so a dependency that is an object — a class holding configuration, a parametrized resolver — has to be hashable to get there. A plain dataclass is not, and a frozen one still refuses as soon as it holds a list or a dict.
+Resolved values are cached in their scope by the callable that resolves them, so a dependency that is an object — a class holding configuration, a parametrized resolver — has to be hashable to get there. A plain dataclass is not, and a frozen one still refuses as soon as it holds a list or a dict.
 
 `MakeDataclass` is a base class that makes its subclasses dataclasses with a hash that always answers: by fields when they can be hashed, by identity when they cannot.
 
