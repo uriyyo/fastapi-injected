@@ -1,7 +1,7 @@
 import dataclasses
 import inspect
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any, get_args, get_origin
 
 from fastapi.dependencies.utils import get_typed_signature
@@ -132,6 +132,48 @@ class CallProxy:
         return param
 
 
+class DetachedOverrides(Mapping[Any, Any]):
+    # an override replaces a call inside FastAPI, past where a proxy could be put on it,
+    # so the overrides of a resolve hand out what they hold behind one
+    __slots__ = ("_handed", "_overrides", "_proxies")
+
+    def __init__(self, overrides: Mapping[Any, Any], proxies: list[CallProxy], /) -> None:
+        self._overrides = overrides
+        self._proxies = proxies
+        self._handed: dict[int, CallProxy] = {}
+
+    @property
+    def dependency_overrides(self) -> Mapping[Any, Any]:
+        # FastAPI asks a provider for its overrides, and this is both
+        return self
+
+    def __getitem__(self, key: Any) -> Any:
+        override = self._overrides[key]
+
+        if is_static_call(override):
+            return override
+
+        if (proxy := self._handed.get(id(override))) is None:
+            proxy = self._handed[id(override)] = CallProxy(override, self._proxies)
+
+        return proxy
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._overrides)
+
+    def __len__(self) -> int:
+        return len(self._overrides)
+
+    def __bool__(self) -> bool:
+        # FastAPI takes the override path only when there are some, and asks at every step
+        return bool(self._overrides)
+
+
+def release(proxies: list[CallProxy], /) -> None:
+    for proxy in proxies:
+        proxy.release()
+
+
 def unwrap_proxy(call: Any, /) -> Any:
     if isinstance(call, CallProxy) and call.call is not None:
         return call.call
@@ -141,8 +183,10 @@ def unwrap_proxy(call: Any, /) -> Any:
 
 __all__ = [
     "CallProxy",
+    "DetachedOverrides",
     "annotated",
     "is_static_annotation",
     "is_static_call",
+    "release",
     "unwrap_proxy",
 ]

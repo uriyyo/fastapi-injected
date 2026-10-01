@@ -9,7 +9,7 @@ from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 from fastapi.exceptions import RequestValidationError
 
-from ._calls import CallProxy, annotated, is_static_annotation
+from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation, release
 from ._deps_tp import is_dep, unwrap_tp
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
@@ -87,8 +87,7 @@ def single_dependant[**P, R](
     try:
         yield dependant
     finally:
-        for proxy in proxies:
-            proxy.release()
+        release(proxies)
 
 
 def _value_factory(annotation: Any, /) -> Callable[..., Coro[Any]]:
@@ -145,16 +144,21 @@ async def resolve_dependencies(
     *,
     single: bool = False,
 ) -> dict[str, Any]:
-    async with scope.lock:
-        solved = await solve_dependencies(
-            request=scope.bound_request,
-            dependant=dependant,
-            dependency_cache=cast("DependencyCache", scope.cache_for(dependant)),
-            dependency_overrides_provider=scope,
-            # this parameter is deprecated and not used
-            async_exit_stack=cast(AsyncExitStack, None),
-            embed_body_fields=False,
-        )
+    proxies: list[CallProxy] = []
+
+    try:
+        async with scope.lock:
+            solved = await solve_dependencies(
+                request=scope.bound_request,
+                dependant=dependant,
+                dependency_cache=cast("DependencyCache", scope.cache_for(dependant)),
+                dependency_overrides_provider=DetachedOverrides(scope.dependency_overrides, proxies),
+                # this parameter is deprecated and not used
+                async_exit_stack=cast(AsyncExitStack, None),
+                embed_body_fields=False,
+            )
+    finally:
+        release(proxies)
 
     if solved.errors:
         raise DependencyResolutionError(solved.errors)

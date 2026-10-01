@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
+from anyio import to_thread
 from fastapi import Depends, params
 
 from fastapi_injected import (
     Dep,
+    FactoryOverride,
     Given,
     Injected,
     MakeInjected,
@@ -219,3 +221,29 @@ async def test_a_runtime_dependency_shares_the_scope_cache_with_static_ones():
                 return foo
 
         assert await resolve(Peek(foo=FooDep)) is foo
+
+
+OVERRIDES: dict[str, Callable[[Payload], Any]] = {
+    "value": lambda payload: payload,
+    "factory": lambda payload: FactoryOverride(lambda: payload),
+}
+
+
+@pytest.mark.parametrize("make", OVERRIDES.values(), ids=OVERRIDES.keys())
+async def test_overrides_are_not_kept_alive_past_their_block(make: Callable[[Payload], Any]):
+    refs = []
+
+    for _ in range(3):
+        payload = Payload()
+        refs.append(weakref.ref(payload))
+
+        with push_overrides({Payload: make(payload)}):
+            assert await resolve(Payload) is payload
+
+        del payload
+
+    # an idle worker thread holds the last result it computed until it runs again
+    await to_thread.run_sync(lambda: None)
+    gc.collect()
+
+    assert not [ref for ref in refs if ref() is not None]

@@ -6,7 +6,7 @@ import pytest
 from fastapi import Depends
 
 from fastapi_injected import push_inject_scope, resolve
-from fastapi_injected._calls import CallProxy, is_static_annotation, is_static_call
+from fastapi_injected._calls import CallProxy, DetachedOverrides, is_static_annotation, is_static_call
 
 pytestmark = pytest.mark.asyncio
 
@@ -101,3 +101,17 @@ async def test_a_proxy_shows_fastapi_the_signature_it_stands_for():
 
     # FastAPI reads the parameters only, its own typed signature drops the return annotation
     assert inspect.signature(CallProxy(call, [])).parameters == inspect.signature(call).parameters
+
+
+async def test_detached_overrides_hand_out_what_was_made_at_runtime_behind_a_proxy():
+    value = One()
+    proxies: list[CallProxy] = []
+    overrides = DetachedOverrides({module_level: value, One: module_level}, proxies)
+
+    assert overrides.dependency_overrides is overrides
+    assert (list(overrides), len(overrides), bool(overrides)) == ([module_level, One], 2, True)
+    assert overrides[One] is module_level  # written in source, nothing to detach
+    assert overrides[module_level] is overrides[module_level]
+    assert overrides[module_level] == value
+    assert proxies == [value]
+    assert not DetachedOverrides({}, [])
