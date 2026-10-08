@@ -1,5 +1,6 @@
+import json
 from collections import ChainMap
-from collections.abc import AsyncGenerator, Generator, Iterator, MutableMapping
+from collections.abc import AsyncGenerator, Generator, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import (
     AbstractContextManager,
     AsyncExitStack,
@@ -9,10 +10,13 @@ from contextlib import (
 from contextvars import ContextVar
 from dataclasses import field, replace
 from typing import Any, Self, cast
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.dependencies.models import Dependant
+from fastapi.encoders import jsonable_encoder
 from fastapi.routing import APIRoute, APIWebSocketRoute
+from starlette.datastructures import FormData
 from starlette.requests import HTTPConnection
 from starlette.types import Message, Scope
 from starlette.websockets import WebSocketState
@@ -60,15 +64,46 @@ def _dummy_scope() -> Scope:
     )
 
 
+def _raw_body(body: Any, /) -> tuple[bytes, str | None]:
+    match body:
+        case None:
+            return b"", None
+        case bytes():
+            return body, None
+        case str():
+            return body.encode(), None
+        case _:
+            return json.dumps(jsonable_encoder(body)).encode(), "application/json"
+
+
+def _raw_headers(
+    headers: Mapping[str, str],
+    cookies: Mapping[str, str],
+    /,
+    *,
+    content_type: str | None,
+) -> list[tuple[bytes, bytes]]:
+    raw = {key.lower(): value for key, value in headers.items()}
+
+    if content_type is not None:
+        raw.setdefault("content-type", content_type)
+
+    if cookies:
+        raw["cookie"] = "; ".join(f"{key}={value}" for key, value in cookies.items())
+
+    return [(key.encode("latin-1"), value.encode("latin-1")) for key, value in raw.items()]
+
+
 def _dummy_request(
     *,
     app: FastAPI | None = None,
+    body: bytes = b"",
     extra_scope: Scope | None = None,
 ) -> Request:
     async def _dummy_receive() -> Message:
         return {
             "type": "http.request",
-            "body": b"",
+            "body": body,
         }
 
     async def _dummy_send(_: Message, /) -> None:
@@ -114,6 +149,59 @@ class _ReboundWebSocket(WebSocket):
         self._origin.application_state = state
 
 
+class _ReboundRequest(Request):
+    def __init__(self, origin: Request, /, *, scope: Scope) -> None:
+        super().__init__(scope, receive=origin.receive, send=origin._send)  # noqa: SLF001
+
+        self._origin = origin
+
+    async def stream(self) -> AsyncGenerator[bytes]:
+        async for chunk in self._origin.stream():
+            yield chunk
+
+    async def body(self) -> bytes:
+        return await self._origin.body()
+
+    async def json(self) -> Any:
+        return await self._origin.json()
+
+    async def _get_form(self, **kwargs: Any) -> FormData:
+        return await self._origin._get_form(**kwargs)  # noqa: SLF001
+
+    @property
+    def _form(self) -> FormData | None:
+        return self._origin._form  # noqa: SLF001
+
+    @_form.setter
+    def _form(self, _: FormData | None) -> None:
+        pass
+
+    async def close(self) -> None:
+        await self._origin.close()
+
+
+def synthetic_request(  # noqa: PLR0913
+    *,
+    app: FastAPI | None = None,
+    headers: Mapping[str, str] | None = None,
+    query: Mapping[str, str | Sequence[str]] | None = None,
+    cookies: Mapping[str, str] | None = None,
+    path_params: Mapping[str, Any] | None = None,
+    body: Any = None,
+) -> Request:
+    raw_body, content_type = _raw_body(body)
+
+    return _dummy_request(
+        app=app,
+        body=raw_body,
+        extra_scope={
+            "headers": _raw_headers(headers or {}, cookies or {}, content_type=content_type),
+            "query_string": urlencode(query or {}, doseq=True).encode("latin-1"),
+            "path_params": dict(path_params or {}),
+        },
+    )
+
+
 def _rebind_request(
     request: BoundConnection,
     /,
@@ -125,11 +213,7 @@ def _rebind_request(
     if isinstance(request, WebSocket):
         return _ReboundWebSocket(request, scope=scope)
 
-    return Request(
-        scope,
-        receive=request.receive,
-        send=request._send,  # noqa: SLF001
-    )
+    return _ReboundRequest(request, scope=scope)
 
 
 class InjectScope(MakeDataclass):
@@ -270,6 +354,8 @@ async def push_inject_scope(
             else _dummy_request(app=app, extra_scope=extra_scope)
         )
 
+        request.scope.setdefault("fastapi_middleware_astack", stack)
+
         scope = InjectScope(
             dependency_cache,
             request,
@@ -302,4 +388,5 @@ __all__ = [
     "UnboundScopeError",
     "inside_inject_scope",
     "push_inject_scope",
+    "synthetic_request",
 ]

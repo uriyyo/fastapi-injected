@@ -4,7 +4,7 @@ from typing import cast
 from fastapi import params
 from fastapi.dependencies.models import Dependant
 
-from ._deps_tp import is_arg, is_dep
+from ._deps_tp import is_arg, is_dep, is_request_param
 from .types import Decorator, Func, HasSignature, Injected
 
 
@@ -12,7 +12,7 @@ class NotADependencyError(TypeError):
     def __init__(self, name: str, /) -> None:
         super().__init__(
             f"parameter {name!r} defaults to Injected but is not a dependency - "
-            f"annotate it with Dep[...] or Depends(...)",
+            f"annotate it with Dep[...], Depends(...) or a request parameter like Header(...)",
         )
 
         self.name = name
@@ -27,7 +27,11 @@ def _is_dep_param(param: inspect.Parameter) -> bool:
     if is_arg(param.annotation):
         return False
 
-    return is_dep(param.annotation) or isinstance(param.default, params.Depends)
+    if is_dep(param.annotation) or isinstance(param.default, params.Depends):
+        return True
+
+    # a request parameter is the caller's, unless the function asks for it to be injected
+    return param.default is Injected and is_request_param(param.annotation)
 
 
 def prepare_sign(sign: inspect.Signature) -> inspect.Signature:
@@ -54,7 +58,17 @@ def strip_deps_from_sign(
     sign: inspect.Signature,
     dependent: Dependant,
 ) -> inspect.Signature:
-    names = {param.name for param in dependent.dependencies}
+    names = {param.name for param in dependent.dependencies} | {
+        field.name
+        for fields in (
+            dependent.path_params,
+            dependent.query_params,
+            dependent.header_params,
+            dependent.cookie_params,
+            dependent.body_params,
+        )
+        for field in fields
+    }
 
     return sign.replace(parameters=[param for param in sign.parameters.values() if param.name not in names])
 

@@ -1,6 +1,6 @@
 from typing import Annotated, Any, TypeVar, get_args, get_origin
 
-from fastapi.params import Depends
+from fastapi.params import Body, Depends, Param
 from typing_inspection.typing_objects import is_typealiastype
 
 from .types import ArgMarker
@@ -25,6 +25,13 @@ def is_dep(tp: Any) -> bool:
     tp = unwrap_tp(tp)
 
     return any(isinstance(tp, Depends) for tp in _get_annotated_metadata(tp))
+
+
+def is_request_param(tp: Any) -> bool:
+    # a marker FastAPI reads from the request: `Header()`, `Query()`, `Path()`, `Cookie()`, the body ones
+    tp = unwrap_tp(tp)
+
+    return any(isinstance(tp, Param | Body) for tp in _get_annotated_metadata(tp))
 
 
 def is_arg(tp: Any) -> bool:
@@ -66,6 +73,7 @@ def unwrap_dep_dependency(obj: Any, /) -> Any:
 __all__ = [
     "is_arg",
     "is_dep",
+    "is_request_param",
     "unwrap_dep_dependency",
     "unwrap_dep_tp",
     "unwrap_tp",

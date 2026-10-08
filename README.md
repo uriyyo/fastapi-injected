@@ -143,6 +143,24 @@ async with push_inject_scope(app=app):
 
 Without it, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
 
+When a dependency reads more of the request than that — a header, a cookie, a query or path parameter, the body — describe the request with `synthetic_request` and hand it to the scope:
+
+```python
+from fastapi_injected import push_inject_scope, synthetic_request
+
+request = synthetic_request(
+    headers={"x-trace": "job-42"},
+    cookies={"sid": "abc"},
+    query={"page": "2"},
+    path_params={"item_id": 7},
+    body={"name": "readme"},  # sent as JSON; bytes and str are sent as they are
+    app=app,
+)
+
+async with push_inject_scope(request=request):
+    await handler()  # `Header()`, `Cookie()`, `Query()`, `Path()` and `Body()` resolve from it
+```
+
 Analysing a dependency is the expensive part of resolving one, so the result is cached — keyed by the dependency itself, not by whatever object carried it, so nothing that only passed through is kept alive. Only dependencies written in source code are cached this way: functions and classes, and annotations built from them. One made at runtime — `Given(...)`, a `MakeInjected` or `bind_deps` result, an object that brings its own `Depends` — is analysed again on every resolve, and FastAPI never gets to keep it: what it carries is released with the resolve instead of living as long as the process. `clear_dependant_cache()` drops the cache, for long-lived processes and test suites that want the memory back.
 
 ### Overriding dependencies
@@ -343,6 +361,39 @@ async def ws_route(websocket: WebSocket, service: Dep[Service]) -> None:
     await resolve(notify)  # sends through the connection the route accepted
 ```
 
+Dependencies that take request parameters — `Header()`, `Cookie()`, `Query()`, `Path()`, and the body as `Body()`, `Form()`, `File()` or a pydantic model — resolve from the request the scope is bound to, exactly as they would in the route:
+
+```python
+class Item(BaseModel):
+    name: str
+
+
+async def get_item(item: Item) -> Item:
+    return item
+
+
+@app.post("/items")
+async def create(request: Request) -> str:
+    item = await resolve(get_item)  # the request body, parsed as FastAPI would
+    ...
+```
+
+A request parameter is a dependency of its own as well - resolve a marker, or an annotation carrying one, without writing a function around it. On its own it has no parameter name, so the marker says what to read; a marker without an alias raises `UnnamedParamError`:
+
+```python
+api_key = await resolve(Header(alias="x-api-key"))  # the raw header, as `Any`
+page = await resolve(Annotated[int, Query(alias="page")])  # validated as `int`
+item_id = await resolve(Annotated[int, Path(alias="item_id")])
+item = await resolve(Annotated[Item, Body()])  # the whole body needs no name
+
+
+@inject
+async def handler(*, api_key: Annotated[str, Header()] = Injected) -> str:
+    return api_key  # a parameter has a name - `x-api-key`, as FastAPI derives it
+```
+
+The body is read only when the resolved dependency declares one, and it is read once per request, shared with the route and every scope nested in it. When the route itself declares a body, dependencies see it in the shape the route gave it: a route with several body parameters embeds them under their names, and a dependency reads its own from there.
+
 `push_inject_scope(request=...)` accepts either a `Request` or a `WebSocket`, and so does everything that reads `InjectScope.request` — the union is `fastapi_injected.types.BoundConnection`.
 
 ## What is public
@@ -353,10 +404,10 @@ Everything the package supports is importable from `fastapi_injected` itself, an
 | --- | --- |
 | Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
 | Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
-| Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `push_overrides`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
+| Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `synthetic_request`, `push_overrides`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
 | Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency` |
 | FastAPI integration | `add_injected_scope`, `init_inject_scope` |
-| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundScopeError` |
+| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundScopeError`, `UnnamedParamError` |
 
 `fastapi_injected.types` holds the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro` and friends — and is public too. Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
 

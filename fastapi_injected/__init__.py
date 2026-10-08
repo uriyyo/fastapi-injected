@@ -8,12 +8,13 @@ from .deps import (
     DependencyResolutionError,
     HasDependsHook,
     MissedDependencyError,
+    UnnamedParamError,
     clear_dependant_cache,
 )
 from .inject import inject
 from .overrides import FactoryOverride, Overrides, OverridesProvider, ValueOverride, push_overrides
 from .resolve import resolve
-from .scope import InjectScope, UnboundScopeError, inside_inject_scope, push_inject_scope
+from .scope import InjectScope, UnboundScopeError, inside_inject_scope, push_inject_scope, synthetic_request
 from .sign import NotADependencyError
 from .types import Arg, ArgMarker, Dep, DepFactory, DepOf, Injected
 
@@ -38,6 +39,7 @@ __all__ = [
     "OverridesProvider",
     "UnboundDepArgsError",
     "UnboundScopeError",
+    "UnnamedParamError",
     "ValueOverride",
     "add_injected_scope",
     "bind_deps",
@@ -52,6 +54,7 @@ __all__ = [
     "remap_dep_args",
     "resolve",
     "signature_with_deps",
+    "synthetic_request",
     "unwrap_dep_dependency",
     "unwrap_dep_tp",
 ]

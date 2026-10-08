@@ -2,15 +2,17 @@ import inspect
 from collections.abc import Callable, Generator
 from contextlib import AsyncExitStack, contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Literal, Protocol, cast, overload, runtime_checkable
+from typing import Any, Literal, Protocol, cast, get_args, overload, runtime_checkable
 
 from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
 from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel
 
+from ._body import InvalidBodyError, request_body
 from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation, release
-from ._deps_tp import is_dep, unwrap_tp
+from ._deps_tp import is_dep, is_request_param, unwrap_tp
 from .scope import InjectScope
 from .sign import prepare_sign, update_func_sign
 from .types import Coro, DependencyCache, HasSignature
@@ -23,6 +25,16 @@ class DependencyResolutionError(ValueError):
 
     def as_validation_error(self) -> RequestValidationError:
         return RequestValidationError(self.errors)
+
+
+class UnnamedParamError(TypeError):
+    def __init__(self, param: Any, /) -> None:
+        super().__init__(
+            f"{type(param).__name__}() resolved on its own has no parameter name to read from the request - "
+            f"give it an alias, like {type(param).__name__}(alias='x-api-key')",
+        )
+
+        self.param = param
 
 
 class MissedDependencyError(ValueError):
@@ -66,6 +78,10 @@ def single_dependant[**P, R](
     match func:
         case _ if is_dep(func):
             annotation = unwrap_tp(func)
+        case _ if is_request_param(func):
+            annotation = _named_param(unwrap_tp(func))
+        case params.Param() | params.Body():
+            annotation = _named_param(annotated(Any, func))
         case HasDependsHook():
             annotation = annotated(Any, func.__get_depends__())
         case _:
@@ -88,6 +104,28 @@ def single_dependant[**P, R](
         yield dependant
     finally:
         release(proxies)
+
+
+def _named_param(annotation: Any, /) -> Any:
+    # resolved on its own, a marker has no parameter name - FastAPI would read `__value__`
+    tp, *markers = get_args(annotation)
+
+    for param in markers:
+        match param:
+            case params.Param():
+                named = True
+            case params.Form():
+                # a form field is read by name, unless it is a model of the whole form
+                named = not (inspect.isclass(tp) and issubclass(tp, BaseModel))
+            case params.Body():
+                named = bool(param.embed)
+            case _:
+                continue
+
+        if named and not (param.alias or param.validation_alias):
+            raise UnnamedParamError(param)
+
+    return annotation
 
 
 def _value_factory(annotation: Any, /) -> Callable[..., Coro[Any]]:
@@ -148,6 +186,8 @@ async def resolve_dependencies(
 
     try:
         async with scope.lock:
+            body, embed_body_fields = await request_body(scope.bound_request, dependant)
+
             solved = await solve_dependencies(
                 request=scope.bound_request,
                 dependant=dependant,
@@ -155,8 +195,11 @@ async def resolve_dependencies(
                 dependency_overrides_provider=DetachedOverrides(scope.dependency_overrides, proxies),
                 # this parameter is deprecated and not used
                 async_exit_stack=cast(AsyncExitStack, None),
-                embed_body_fields=False,
+                body=body,
+                embed_body_fields=embed_body_fields,
             )
+    except InvalidBodyError as exc:
+        raise DependencyResolutionError(exc.errors) from None
     finally:
         release(proxies)
 
@@ -176,6 +219,7 @@ __all__ = [
     "DependencyResolutionError",
     "HasDependsHook",
     "MissedDependencyError",
+    "UnnamedParamError",
     "clear_dependant_cache",
     "create_dependant",
     "resolve_dependencies",
