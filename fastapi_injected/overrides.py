@@ -1,4 +1,4 @@
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import field
 from typing import Any
@@ -19,7 +19,7 @@ def push_overrides(
     /,
     *,
     provider: HasDependencyOverrides | None = None,
-) -> Iterator[InjectScope]:
+) -> Generator[InjectScope]:
     scope = InjectScope.current() or InjectScope()
 
     with scope.override(overrides, provider=provider) as child:

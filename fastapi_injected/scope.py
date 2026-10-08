@@ -1,5 +1,5 @@
 from collections import ChainMap
-from collections.abc import AsyncIterator, Iterator, MutableMapping
+from collections.abc import AsyncGenerator, Generator, Iterator, MutableMapping
 from contextlib import (
     AbstractContextManager,
     AsyncExitStack,
@@ -229,7 +229,7 @@ _inject_scope: ContextVar[InjectScope | None] = ContextVar(
 
 
 @contextmanager
-def _push_scope[S: InjectScope](scope: S, /) -> Iterator[S]:
+def _push_scope[S: InjectScope](scope: S, /) -> Generator[S]:
     token = _inject_scope.set(scope)
 
     try:
@@ -247,7 +247,7 @@ async def push_inject_scope(
     request: BoundConnection | None = None,
     app: FastAPI | None = None,
     provider: HasDependencyOverrides | None = None,
-) -> AsyncIterator[InjectScope]:
+) -> AsyncGenerator[InjectScope]:
     if dependency_cache is None:
         dependency_cache = {}
 
@@ -285,7 +285,7 @@ async def push_inject_scope(
 async def inside_inject_scope(
     *,
     new_scope: bool = False,
-) -> AsyncIterator[InjectScope]:
+) -> AsyncGenerator[InjectScope]:
     scope = InjectScope.current()
 
     async with AsyncExitStack() as stack:

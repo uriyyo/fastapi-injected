@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import AsyncExitStack, contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Literal, Protocol, cast, overload, runtime_checkable
@@ -62,7 +62,7 @@ def single_dependant[**P, R](
     /,
     *,
     path: str | None = None,
-) -> Iterator[Dependant]:
+) -> Generator[Dependant]:
     match func:
         case _ if is_dep(func):
             annotation = unwrap_tp(func)
