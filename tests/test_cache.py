@@ -1,4 +1,4 @@
-from fastapi_injected._cache import ScopeCache
+from fastapi_injected._cache import ContextCache
 
 
 def dep() -> int:
@@ -13,33 +13,33 @@ DEP_KEY = (dep, (), "")
 OTHER_KEY = (other_dep, (), "")
 
 
-def test_scope_cache_reads_through_to_fallbacks():
-    cache = ScopeCache({}, [({DEP_KEY: 1}, frozenset())])
+def test_ctx_cache_reads_through_to_fallbacks():
+    cache = ContextCache({}, [({DEP_KEY: 1}, frozenset())])
 
     assert cache[DEP_KEY] == 1
     assert DEP_KEY in cache
 
 
-def test_scope_cache_hides_overridden_entries():
-    cache = ScopeCache({}, [({DEP_KEY: 1, OTHER_KEY: 2}, frozenset({dep}))])
+def test_ctx_cache_hides_overridden_entries():
+    cache = ContextCache({}, [({DEP_KEY: 1, OTHER_KEY: 2}, frozenset({dep}))])
 
     assert DEP_KEY not in cache
     assert cache[OTHER_KEY] == 2
 
 
-def test_scope_cache_keeps_its_own_entries():
+def test_ctx_cache_keeps_its_own_entries():
     fallback = {DEP_KEY: 1}
-    cache = ScopeCache({}, [(fallback, frozenset({dep}))])
+    cache = ContextCache({}, [(fallback, frozenset({dep}))])
 
     cache[DEP_KEY] = 3
 
-    # the override built its own value, and the scope it was pushed into keeps its one
+    # the override built its own value, and the context it was pushed into keeps its one
     assert cache[DEP_KEY] == 3
     assert fallback[DEP_KEY] == 1
 
 
-def test_scope_cache_iterates_over_visible_entries():
-    cache = ScopeCache(
+def test_ctx_cache_iterates_over_visible_entries():
+    cache = ContextCache(
         {DEP_KEY: 3},
         [
             ({DEP_KEY: 1, OTHER_KEY: 2}, frozenset({dep})),
@@ -51,16 +51,16 @@ def test_scope_cache_iterates_over_visible_entries():
     assert len(cache) == 2
 
 
-def test_scope_cache_deletes_from_its_own_entries():
-    cache = ScopeCache({DEP_KEY: 3})
+def test_ctx_cache_deletes_from_its_own_entries():
+    cache = ContextCache({DEP_KEY: 3})
 
     del cache[DEP_KEY]
 
     assert DEP_KEY not in cache
 
 
-def test_scope_cache_misses():
-    cache = ScopeCache({}, [({}, frozenset())])
+def test_ctx_cache_misses():
+    cache = ContextCache({}, [({}, frozenset())])
 
     assert cache.get(DEP_KEY) is None
     assert not cache

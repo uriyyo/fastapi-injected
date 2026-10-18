@@ -10,9 +10,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from fastapi_injected import (
     DependencyResolutionError,
     Injected,
-    add_injected_scope,
+    add_injection,
     inject,
-    push_inject_scope,
+    injection_ctx,
     resolve,
     synthetic_request,
 )
@@ -86,7 +86,7 @@ class _CountingReceive:
 app = FastAPI()
 
 
-add_injected_scope(app)
+add_injection(app)
 counting = _CountingReceive(app)
 client = TestClient(counting)
 
@@ -102,7 +102,7 @@ async def shapes(request: Request) -> list[Any]:
     return [
         (await resolve(ItemDep)).name,
         await resolve(Name),
-        await resolve(Name, new_scope=True),
+        await resolve(Name, new_ctx=True),
         (await request.json())["name"],
     ]
 
@@ -127,7 +127,7 @@ async def concurrent() -> list[str]:
 
 @app.post("/route-then-nested")
 async def route_then_nested(item: Item, request: Request) -> list[str]:
-    @inject(new_scope=True)
+    @inject(new_ctx=True)
     async def _fresh(*, fresh: ItemDep = Injected) -> str:
         return fresh.name
 
@@ -204,7 +204,7 @@ def test_concurrent_resolves_share_one_read() -> None:
     assert counting.reads == [1]
 
 
-def test_route_body_is_not_read_again_by_a_fresh_scope() -> None:
+def test_route_body_is_not_read_again_by_a_fresh_ctx() -> None:
     assert client.post("/route-then-nested", json={"name": "d"}).json() == ["d", "d", "d", "string_type"]
     assert counting.reads == [1]
 
@@ -259,8 +259,8 @@ async def test_concurrent_resolves_on_a_synthetic_request():
 
     request._receive = _counting_receive  # noqa: SLF001
 
-    async with push_inject_scope(request=request):
-        names = await asyncio.gather(*(resolve(ItemDep, new_scope=True) for _ in range(5)), resolve(Name))
+    async with injection_ctx(request=request):
+        names = await asyncio.gather(*(resolve(ItemDep, new_ctx=True) for _ in range(5)), resolve(Name))
 
     assert [getattr(name, "name", name) for name in names] == ["l"] * 6
     assert reads == 1

@@ -33,20 +33,20 @@ async def handler(
 
 
 # the parametrized form is a decorator, so it produces the very same function type
-@inject(new_scope=True)
-async def handler_new_scope(*, container: Dep[Container] = Injected) -> Container:
+@inject(new_ctx=True)
+async def handler_new_ctx(*, container: Dep[Container] = Injected) -> Container:
     return container
 
 
 # decorating keeps the signature, injected parameters included
-static_assert(is_assignable_to(TypeOf[handler_new_scope], Callable[[], Coroutine[Any, Any, Container]]))
+static_assert(is_assignable_to(TypeOf[handler_new_ctx], Callable[[], Coroutine[Any, Any, Container]]))
 
 
 async def _calls() -> None:
     # own arguments are passed as usual, injected ones are filled in by the decorator
     static_assert(is_equivalent_to(TypeOf[await handler(1)], int))
     static_assert(is_equivalent_to(TypeOf[await handler(1, "b")], int))
-    static_assert(is_equivalent_to(TypeOf[await handler_new_scope()], Container))
+    static_assert(is_equivalent_to(TypeOf[await handler_new_ctx()], Container))
 
     # ... and nothing stops passing them explicitly
     static_assert(is_equivalent_to(TypeOf[await handler(1, container=Container(Child(), ContextState()))], int))
@@ -58,13 +58,13 @@ async def _negatives() -> None:
     await handler(1, container=Child())  # type: ignore[ty:invalid-argument-type]
     await handler(1, unknown=1)  # type: ignore[ty:unknown-argument]
 
-    inject(new_scope="yes")  # type: ignore[ty:invalid-argument-type]
+    inject(new_ctx="yes")  # type: ignore[ty:invalid-argument-type]
 
     # the wrapper awaits what it decorates, so sync functions are rejected by both forms
     @inject  # type: ignore[ty:invalid-argument-type]
     def _sync(*, container: Dep[Container] = Injected) -> None:
         pass
 
-    @inject(new_scope=True)  # type: ignore[ty:invalid-argument-type]
-    def _sync_new_scope(*, container: Dep[Container] = Injected) -> None:
+    @inject(new_ctx=True)  # type: ignore[ty:invalid-argument-type]
+    def _sync_new_ctx(*, container: Dep[Container] = Injected) -> None:
         pass

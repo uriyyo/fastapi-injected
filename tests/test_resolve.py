@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import pytest
 from fastapi import Depends, params
 
-from fastapi_injected import Dep, push_inject_scope, resolve
+from fastapi_injected import Dep, injection_ctx, resolve
 
 pytestmark = pytest.mark.asyncio
 
@@ -27,7 +27,7 @@ async def test_resolve():
 
 
 async def test_resolve_reuse_cache():
-    async with push_inject_scope():
+    async with injection_ctx():
         b1 = await resolve(Bar)
         b2 = await resolve(Bar)
 
@@ -83,7 +83,7 @@ async def test_resolve_depends_hook():
 
 
 async def test_resolve_depends_hook_reuse_cache():
-    async with push_inject_scope():
+    async with injection_ctx():
         b1 = await resolve(DependsHook())
         b2 = await resolve(DependsHook())
 
@@ -91,7 +91,7 @@ async def test_resolve_depends_hook_reuse_cache():
 
 
 async def test_resolve_depends_hook_no_cache():
-    async with push_inject_scope():
+    async with injection_ctx():
         b1 = await resolve(DependsHook(use_cache=False))
         b2 = await resolve(DependsHook(use_cache=False))
 

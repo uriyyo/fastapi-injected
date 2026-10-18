@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from fastapi_injected import Given, is_dep, push_inject_scope, push_overrides, resolve
+from fastapi_injected import Given, injection_ctx, is_dep, push_overrides, resolve
 
 pytestmark = pytest.mark.asyncio
 
@@ -44,7 +44,7 @@ async def test_given_can_be_used_as_an_annotation():
 async def test_constants_holding_equal_values_are_one_dependency():
     first, second = Token("same"), Token("same")
 
-    async with push_inject_scope():
+    async with injection_ctx():
         assert await resolve(Given(first)) is first
         # the second constant is the same dependency, so what the first one built is reused
         assert await resolve(Given(second)) is first
@@ -53,7 +53,7 @@ async def test_constants_holding_equal_values_are_one_dependency():
 async def test_constants_holding_unhashable_values_are_their_own():
     first, second = ["same"], ["same"]
 
-    async with push_inject_scope():
+    async with injection_ctx():
         assert await resolve(Given(first)) is first
         # nothing says two equal lists are the same value, so they are told apart by identity
         assert await resolve(Given(second)) is second

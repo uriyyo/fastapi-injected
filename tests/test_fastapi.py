@@ -8,9 +8,9 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketState
 
-from fastapi_injected import Dep, Injected, add_injected_scope, init_inject_scope, inject, push_inject_scope, resolve
-from fastapi_injected._fastapi_lifecycle import InjectScopeMiddleware
-from fastapi_injected.scope import InjectScope
+from fastapi_injected import Dep, Injected, add_injection, bind_injection_ctx, inject, injection_ctx, resolve
+from fastapi_injected._fastapi_lifecycle import InjectionMiddleware
+from fastapi_injected.ctx import InjectionContext
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -25,11 +25,7 @@ async def _resolve_in_middleware(request: Request, call_next: Callable[[Request]
     return await call_next(request)
 
 
-# added last so it is the outermost middleware, and the ones above resolve inside its scope
-add_injected_scope(app)
-
-
-add_injected_scope(app)
+add_injection(app)
 
 
 client = TestClient(app)
@@ -80,18 +76,18 @@ def test_resolve_uses_route_path() -> None:
 _nested_states: list[ContextState] = []
 
 
-@app.get("/nested-scope")
-async def nested_scope_route(request: Request) -> dict[str, int]:
-    async with push_inject_scope(request=request):
+@app.get("/nested-ctx")
+async def nested_ctx_route(request: Request) -> dict[str, int]:
+    async with injection_ctx(request=request):
         _nested_states.append(await resolve(ctx_dep))
 
     return {"closed_inside": sum(state.closed for state in _nested_states)}
 
 
-def test_nested_scope_owns_its_lifetime() -> None:
+def test_nested_ctx_owns_its_lifetime() -> None:
     _nested_states.clear()
 
-    result = client.get("/nested-scope")
+    result = client.get("/nested-ctx")
 
     assert result.status_code == status.HTTP_200_OK
     assert result.json() == {"closed_inside": 1}
@@ -99,49 +95,49 @@ def test_nested_scope_owns_its_lifetime() -> None:
 
 @app.get("/synthetic")
 async def synthetic_route(request: Request) -> dict[str, bool]:
-    scope = InjectScope.current()
-    assert scope is not None
+    ctx = InjectionContext.current()
+    assert ctx is not None
 
-    async with push_inject_scope(request=request) as nested:
-        return {"scope": scope.synthetic, "nested": nested.synthetic}
+    async with injection_ctx(request=request) as nested:
+        return {"ctx": ctx.synthetic, "nested": nested.synthetic}
 
 
-def test_request_scope_is_not_synthetic() -> None:
+def test_request_ctx_is_not_synthetic() -> None:
     result = client.get("/synthetic")
 
     assert result.status_code == status.HTTP_200_OK
-    assert result.json() == {"scope": False, "nested": False}
+    assert result.json() == {"ctx": False, "nested": False}
 
 
-@app.get("/nested-scope-state")
-async def nested_scope_state_route(request: Request) -> bool:
+@app.get("/nested-ctx-state")
+async def nested_ctx_state_route(request: Request) -> bool:
     request.state.value = 42
 
-    async with push_inject_scope(request=request) as scope:
-        assert scope.request.state.value == 42
-        assert scope.request.url.path == request.url.path
+    async with injection_ctx(request=request) as ctx:
+        assert ctx.request.state.value == 42
+        assert ctx.request.url.path == request.url.path
 
-        scope.request.state.value = 43
+        ctx.request.state.value = 43
 
     return request.state.value == 43
 
 
-def test_nested_scope_shares_request_state() -> None:
-    result = client.get("/nested-scope-state")
+def test_nested_ctx_shares_request_state() -> None:
+    result = client.get("/nested-ctx-state")
 
     assert result.status_code == status.HTTP_200_OK
     assert result.json() is True
 
 
-def test_add_injected_scope_is_idempotent() -> None:
+def test_add_injection_is_idempotent() -> None:
     other_app = FastAPI(dependencies=[Depends(_item_id_dep)])
     other_app.add_middleware(GZipMiddleware)
 
-    add_injected_scope(other_app)
-    add_injected_scope(other_app)
+    add_injection(other_app)
+    add_injection(other_app)
 
-    assert [middleware.cls for middleware in other_app.user_middleware] == [InjectScopeMiddleware, GZipMiddleware]
-    assert [dep.dependency for dep in other_app.router.dependencies] == [init_inject_scope, _item_id_dep]
+    assert [middleware.cls for middleware in other_app.user_middleware] == [InjectionMiddleware, GZipMiddleware]
+    assert [dep.dependency for dep in other_app.router.dependencies] == [bind_injection_ctx, _item_id_dep]
 
 
 @app.get("/middleware")
@@ -157,7 +153,7 @@ def test_resolve_in_middleware_shares_the_request_cache() -> None:
 
 
 overridden_app = FastAPI()
-add_injected_scope(overridden_app)
+add_injection(overridden_app)
 
 overridden_client = TestClient(overridden_app)
 
@@ -222,8 +218,8 @@ async def _header_dep(x_trace: Annotated[str, Header()] = "missing") -> str:
 type Trace = Annotated[str, Depends(_header_dep)]
 
 
-@inject(new_scope=True)
-async def _in_new_scope(
+@inject(new_ctx=True)
+async def _in_new_ctx(
     *,
     container: Dep[Container] = Injected,
     trace: Trace = Injected,
@@ -231,20 +227,20 @@ async def _in_new_scope(
     return container, trace
 
 
-@app.get("/new-scope")
-async def new_scope_route(container: Dep[Container], trace: Trace) -> dict[str, bool]:
-    fresh, fresh_trace = await _in_new_scope()
+@app.get("/new-ctx")
+async def new_ctx_route(container: Dep[Container], trace: Trace) -> dict[str, bool]:
+    fresh, fresh_trace = await _in_new_ctx()
 
     return {
-        # a new scope builds its dependencies again ...
+        # a new context builds its dependencies again ...
         "is_fresh": fresh is not container,
         # ... without leaving the request they are built for
         "keeps_request": fresh_trace == trace,
     }
 
 
-def test_new_scope_is_fresh_and_keeps_the_request() -> None:
-    result = client.get("/new-scope", headers={"x-trace": "sent"})
+def test_new_ctx_is_fresh_and_keeps_the_request() -> None:
+    result = client.get("/new-ctx", headers={"x-trace": "sent"})
 
     assert result.status_code == status.HTTP_200_OK
     assert result.json() == {"is_fresh": True, "keeps_request": True}
@@ -301,11 +297,11 @@ type Connection = Annotated[HTTPConnection, Depends(_connection_dep)]
 async def ws_send_route(websocket: WebSocket) -> None:
     await websocket.accept()
 
-    scope = InjectScope.current()
-    assert scope is not None
-    assert scope.request is not websocket
+    ctx = InjectionContext.current()
+    assert ctx is not None
+    assert ctx.request is not websocket
 
-    async with push_inject_scope(request=websocket) as nested:
+    async with injection_ctx(request=websocket) as nested:
         assert nested.request is not websocket
         assert not nested.synthetic
 
@@ -348,15 +344,15 @@ async def ws_state_route(websocket: WebSocket) -> None:
     await websocket.accept()
     websocket.state.value = 42
 
-    async with push_inject_scope(request=websocket) as scope:
-        assert scope.request.state.value == 42
-        scope.request.state.value = 43
+    async with injection_ctx(request=websocket) as ctx:
+        assert ctx.request.state.value == 42
+        ctx.request.state.value = 43
 
     await websocket.send_json({"value": websocket.state.value})
     await websocket.close()
 
 
-def test_websocket_nested_scope_shares_state() -> None:
+def test_websocket_nested_ctx_shares_state() -> None:
     with client.websocket_connect("/ws/state") as ws:
         assert ws.receive_json() == {"value": 43}
 
@@ -382,16 +378,16 @@ def test_websocket_dependencies_are_torn_down_with_the_connection() -> None:
     assert [state.closed for state in _ws_states] == [True]
 
 
-@app.websocket("/ws/new-scope")
-async def ws_new_scope_route(websocket: WebSocket, container: Dep[Container]) -> None:
+@app.websocket("/ws/new-ctx")
+async def ws_new_ctx_route(websocket: WebSocket, container: Dep[Container]) -> None:
     await websocket.accept()
 
-    fresh, _ = await _in_new_scope()
+    fresh, _ = await _in_new_ctx()
 
     await websocket.send_json({"is_fresh": fresh is not container})
     await websocket.close()
 
 
-def test_websocket_new_scope_is_fresh() -> None:
-    with client.websocket_connect("/ws/new-scope") as ws:
+def test_websocket_new_ctx_is_fresh() -> None:
+    with client.websocket_connect("/ws/new-ctx") as ws:
         assert ws.receive_json() == {"is_fresh": True}

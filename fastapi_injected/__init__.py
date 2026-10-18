@@ -2,13 +2,20 @@ from ._bind import UnboundDepArgsError, bind_deps, remap_dep_args, signature_wit
 from ._dataclass import MakeDataclass
 from ._deps_tp import as_depends, is_arg, is_dep, strip_annotation, unwrap_dep_dependency, unwrap_dep_tp
 from ._fastapi_lifecycle import (
-    InjectScopeMiddleware,
+    InjectionMiddleware,
     MissingDependencyCacheError,
-    add_injected_scope,
-    init_inject_scope,
+    add_injection,
+    bind_injection_ctx,
 )
 from ._given import Given
 from ._injected import MakeInjected
+from .ctx import (
+    InjectionContext,
+    UnboundContextError,
+    ensure_injection_ctx,
+    injection_ctx,
+    synthetic_request,
+)
 from .deps import (
     DependencyResolutionError,
     HasDependsHook,
@@ -18,28 +25,7 @@ from .deps import (
 )
 from .inject import inject
 from .overrides import FactoryOverride, Overrides, OverridesProvider, ValueOverride, override_app, push_overrides
-from .reflect import (
-    add_lifespan,
-    add_route_dependency,
-    as_dependant,
-    find_dependant,
-    find_route,
-    iter_api_routes,
-    iter_calls,
-    iter_dependant,
-    iter_operations,
-    iter_overridden,
-    iter_params,
-    iter_routers,
-    iter_routes,
-    iter_routes_where,
-    iter_security,
-    match_route,
-    operation_for,
-    response_type,
-)
 from .resolve import resolve
-from .scope import InjectScope, UnboundScopeError, inside_inject_scope, push_inject_scope, synthetic_request
 from .signature import NotADependencyError, ParamRole, Signature
 from .types import Arg, ArgMarker, Dep, DepFactory, DepOf, Injected
 
@@ -53,9 +39,9 @@ __all__ = [
     "FactoryOverride",
     "Given",
     "HasDependsHook",
-    "InjectScope",
-    "InjectScopeMiddleware",
     "Injected",
+    "InjectionContext",
+    "InjectionMiddleware",
     "MakeDataclass",
     "MakeInjected",
     "MissedDependencyError",
@@ -65,42 +51,24 @@ __all__ = [
     "OverridesProvider",
     "ParamRole",
     "Signature",
+    "UnboundContextError",
     "UnboundDepArgsError",
-    "UnboundScopeError",
     "UnnamedParamError",
     "ValueOverride",
-    "add_injected_scope",
-    "add_lifespan",
-    "add_route_dependency",
-    "as_dependant",
+    "add_injection",
     "as_depends",
     "bind_deps",
+    "bind_injection_ctx",
     "clear_dependant_cache",
-    "find_dependant",
-    "find_route",
-    "init_inject_scope",
+    "ensure_injection_ctx",
     "inject",
-    "inside_inject_scope",
+    "injection_ctx",
     "is_arg",
     "is_dep",
-    "iter_api_routes",
-    "iter_calls",
-    "iter_dependant",
-    "iter_operations",
-    "iter_overridden",
-    "iter_params",
-    "iter_routers",
-    "iter_routes",
-    "iter_routes_where",
-    "iter_security",
-    "match_route",
-    "operation_for",
     "override_app",
-    "push_inject_scope",
     "push_overrides",
     "remap_dep_args",
     "resolve",
-    "response_type",
     "signature_with_deps",
     "strip_annotation",
     "synthetic_request",

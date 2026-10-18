@@ -1,6 +1,6 @@
 from fastapi_injected import Dep, DepFactory, FactoryOverride, ValueOverride, push_overrides
+from fastapi_injected.ctx import InjectionContext
 from fastapi_injected.overrides import OverridesProvider
-from fastapi_injected.scope import InjectScope
 
 from .deps import (
     Child,
@@ -44,12 +44,12 @@ def _overrides() -> None:
     with push_overrides(provider=OverridesProvider({Child: Child()})):
         pass
 
-    # every override block is a scope of its own
-    with push_overrides() as scope:
-        static_assert(is_equivalent_to(TypeOf[scope], InjectScope))
+    # every override block is a context of its own
+    with push_overrides() as ctx:
+        static_assert(is_equivalent_to(TypeOf[ctx], InjectionContext))
 
-        with scope.override({Child: Child()}) as nested:
-            static_assert(is_equivalent_to(TypeOf[nested], InjectScope))
+        with ctx.override({Child: Child()}) as nested:
+            static_assert(is_equivalent_to(TypeOf[nested], InjectionContext))
 
 
 def _negatives() -> None:

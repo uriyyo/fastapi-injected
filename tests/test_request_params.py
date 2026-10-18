@@ -10,10 +10,10 @@ from fastapi_injected import (
     Injected,
     NotADependencyError,
     UnnamedParamError,
-    add_injected_scope,
+    add_injection,
     bind_deps,
     inject,
-    push_inject_scope,
+    injection_ctx,
     resolve,
     synthetic_request,
 )
@@ -30,7 +30,7 @@ class Login(BaseModel):
 app = FastAPI()
 
 
-add_injected_scope(app)
+add_injection(app)
 client = TestClient(app)
 
 
@@ -106,9 +106,9 @@ def test_bound_request_parameters() -> None:
 
 @pytest.mark.asyncio
 async def test_markers_on_a_synthetic_request():
-    request = synthetic_request(headers={"X-API-Key": "s"}, query={"page": "5"}, body={"name": "d"})
+    request = synthetic_request(headers={"X-API-Key": "s"}, query_params={"page": "5"}, body={"name": "d"})
 
-    async with push_inject_scope(request=request):
+    async with injection_ctx(request=request):
         assert await resolve(Header(alias="x-api-key")) == "s"
         assert await resolve(Annotated[int, Query(alias="page")]) == 5
         assert await resolve(Annotated[Item, Body()]) == Item(name="d")
@@ -116,7 +116,7 @@ async def test_markers_on_a_synthetic_request():
 
 @pytest.mark.asyncio
 async def test_marker_validation_errors():
-    async with push_inject_scope(request=synthetic_request(query={"page": "x"})):
+    async with injection_ctx(request=synthetic_request(query_params={"page": "x"})):
         with pytest.raises(DependencyResolutionError) as exc_info:
             await resolve(Annotated[int, Query(alias="page")])
 
@@ -137,7 +137,7 @@ async def test_marker_validation_errors():
 )
 @pytest.mark.asyncio
 async def test_marker_without_a_name_is_rejected(marker: Any):
-    async with push_inject_scope(request=synthetic_request()):
+    async with injection_ctx(request=synthetic_request()):
         with pytest.raises(UnnamedParamError, match="alias"):
             await resolve(marker)
 
@@ -171,5 +171,5 @@ def test_request_parameters_stay_the_callers_without_injected() -> None:
 
 @pytest.mark.asyncio
 async def test_other_metadata_beside_the_marker_is_left_alone():
-    async with push_inject_scope(request=synthetic_request(headers={"x-api-key": "s"})):
+    async with injection_ctx(request=synthetic_request(headers={"x-api-key": "s"})):
         assert await resolve(Annotated[str, "documentation", Header(alias="x-api-key")]) == "s"

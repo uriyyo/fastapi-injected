@@ -4,7 +4,7 @@ from typing import Annotated
 import pytest
 from fastapi import Depends, Query, Request
 
-from fastapi_injected import Arg, Dep, Injected, NotADependencyError, inject, push_inject_scope
+from fastapi_injected import Arg, Dep, Injected, NotADependencyError, inject, injection_ctx
 
 from .deps import Child, Container, ContextState, NonPydanticType
 
@@ -35,22 +35,22 @@ async def test_inject_reuse_cache():
     ) -> Container:
         return bar
 
-    async with push_inject_scope():
+    async with injection_ctx():
         b1 = await func()
         b2 = await func()
 
         assert b1 is b2
 
 
-async def test_inject_new_scope_use_different_cache():
-    @inject(new_scope=True)
+async def test_inject_new_ctx_use_different_cache():
+    @inject(new_ctx=True)
     async def func(
         *,
         bar: Dep[Container] = Injected,
     ) -> Container:
         return bar
 
-    async with push_inject_scope():
+    async with injection_ctx():
         b1 = await func()
         b2 = await func()
 
@@ -176,7 +176,7 @@ async def test_inject_teardown():
     assert ctx.closed
 
 
-async def test_inject_teardown_in_scope():
+async def test_inject_teardown_in_ctx():
     @inject
     async def func(
         *,
@@ -185,7 +185,7 @@ async def test_inject_teardown_in_scope():
         assert not bar.ctx.closed
         return bar.ctx
 
-    async with push_inject_scope():
+    async with injection_ctx():
         ctx = await func()
         assert not ctx.closed
 

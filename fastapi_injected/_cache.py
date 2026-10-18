@@ -34,13 +34,13 @@ def overridden_calls(dependant: Dependant, overrides: Collection[Any], /) -> fro
 
 def _cache_key(key: DependencyCacheKey, /) -> DependencyCacheKey:
     # kept under the call a proxy stands for: the proxy is released once its resolve is
-    # done, the entry has to stay reachable for the rest of the scope
+    # done, the entry has to stay reachable for the rest of the context
     call, *rest = key
 
     return (unwrap_proxy(call), *rest)  # type: ignore[ty:invalid-return-type]
 
 
-class ScopeCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):
+class ContextCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):
     cache: DependencyCache
     fallbacks: Sequence[tuple[Mapping[DependencyCacheKey, Any], frozenset[Any]]] = field(default_factory=tuple)
 
@@ -90,6 +90,6 @@ class ScopeCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):
 
 
 __all__ = [
-    "ScopeCache",
+    "ContextCache",
     "overridden_calls",
 ]

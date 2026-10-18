@@ -8,8 +8,8 @@ from fastapi.dependencies import utils
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ._cache import ScopeCache
-from .scope import push_inject_scope
+from ._cache import ContextCache
+from .ctx import injection_ctx
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 _DEPENDENCY_CACHE_KEY = "__fastapi_injected_dependency_cache__"
@@ -29,9 +29,9 @@ if not TYPE_CHECKING:
         dependency_cache: DependencyCache | None = None,
         **kwargs: Any,
     ) -> utils.SolvedDependency:
-        # a scope brought its own cache - it already reads through to the request one,
+        # a context brought its own cache - it already reads through to the request one,
         # and knows what its overrides make unusable there
-        if not isinstance(dependency_cache, ScopeCache):
+        if not isinstance(dependency_cache, ContextCache):
             if (current_cache := request.scope.get(_DEPENDENCY_CACHE_KEY)) is not None:
                 dependency_cache = current_cache
             elif dependency_cache is None:
@@ -69,12 +69,12 @@ def _get_overrides_provider(connection: HTTPConnection) -> HasDependencyOverride
 
 # annotated as the base class so FastAPI hands over whichever the route has -
 # a `Request` in an HTTP route, a `WebSocket` in a websocket one
-async def init_inject_scope(connection: HTTPConnection) -> AsyncGenerator[None]:
+async def bind_injection_ctx(connection: HTTPConnection) -> AsyncGenerator[None]:
     if not isinstance(connection, Request | WebSocket):  # pragma: no cover
         raise TypeError(f"expected a Request or a WebSocket, got {type(connection).__name__}")
 
-    # the connection of the route: the middleware scope, if any, was bound before routing
-    async with push_inject_scope(
+    # the connection of the route: the middleware context, if any, was bound before routing
+    async with injection_ctx(
         dependency_cache=_get_dependency_cache(connection),
         request=connection,
         provider=_get_overrides_provider(connection),
@@ -83,7 +83,7 @@ async def init_inject_scope(connection: HTTPConnection) -> AsyncGenerator[None]:
 
 
 @dataclass
-class InjectScopeMiddleware:
+class InjectionMiddleware:
     app: ASGIApp
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -100,7 +100,7 @@ class InjectScopeMiddleware:
 
         scope[_DEPENDENCY_CACHE_KEY] = cache = {}
 
-        async with push_inject_scope(
+        async with injection_ctx(
             dependency_cache=cache,
             request=connection,
             provider=scope.get("app"),
@@ -108,20 +108,20 @@ class InjectScopeMiddleware:
             await self.app(scope, receive, send)
 
 
-def add_injected_scope(
+def add_injection(
     app: FastAPI,
     /,
 ) -> None:
-    if not any(middleware.cls is InjectScopeMiddleware for middleware in app.user_middleware):
-        app.add_middleware(InjectScopeMiddleware)
+    if not any(middleware.cls is InjectionMiddleware for middleware in app.user_middleware):
+        app.add_middleware(InjectionMiddleware)
 
-    if not any(dep.dependency is init_inject_scope for dep in app.router.dependencies):
-        app.router.dependencies.insert(0, Depends(init_inject_scope))
+    if not any(dep.dependency is bind_injection_ctx for dep in app.router.dependencies):
+        app.router.dependencies.insert(0, Depends(bind_injection_ctx))
 
 
 __all__ = [
-    "InjectScopeMiddleware",
+    "InjectionMiddleware",
     "MissingDependencyCacheError",
-    "add_injected_scope",
-    "init_inject_scope",
+    "add_injection",
+    "bind_injection_ctx",
 ]

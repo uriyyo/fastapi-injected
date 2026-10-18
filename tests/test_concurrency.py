@@ -5,7 +5,7 @@ from typing import Annotated
 import pytest
 from fastapi import Depends
 
-from fastapi_injected import Dep, Injected, inject, push_inject_scope, resolve
+from fastapi_injected import Dep, Injected, inject, injection_ctx, resolve
 
 pytestmark = pytest.mark.asyncio
 
@@ -29,7 +29,7 @@ class Repository:
 
 
 async def test_concurrent_resolve_reuses_cache():
-    async with push_inject_scope():
+    async with injection_ctx():
         sessions = await asyncio.gather(*[resolve(SessionDep) for _ in range(4)])
 
     assert len({id(session) for session in sessions}) == 1
@@ -40,31 +40,31 @@ async def test_concurrent_inject_reuses_cache():
     async def func(*, repo: Dep[Repository] = Injected) -> Session:
         return repo.session
 
-    async with push_inject_scope():
+    async with injection_ctx():
         sessions = await asyncio.gather(*[func() for _ in range(4)])
 
     assert len({id(session) for session in sessions}) == 1
 
 
-async def test_concurrent_resolve_without_scope_is_not_shared():
+async def test_concurrent_resolve_without_ctx_is_not_shared():
     sessions = await asyncio.gather(*[resolve(SessionDep) for _ in range(4)])
 
     assert len({id(session) for session in sessions}) == 4
 
 
 async def nested_resolve_dep() -> Session:
-    # a dependency is free to resolve more dependencies while the scope is locked for it
+    # a dependency is free to resolve more dependencies while the context is locked for it
     return await resolve(SessionDep)
 
 
 async def spawning_dep() -> Session:
-    # resolving from a task the dependency spawned itself must not block on the scope
+    # resolving from a task the dependency spawned itself must not block on the context
     [session] = await asyncio.gather(resolve(SessionDep))
     return session
 
 
 async def test_nested_resolve_in_spawned_task_does_not_deadlock():
-    async with push_inject_scope():
+    async with injection_ctx():
         async with asyncio.timeout(5):
             session = await resolve(spawning_dep)
 
@@ -72,7 +72,7 @@ async def test_nested_resolve_in_spawned_task_does_not_deadlock():
 
 
 async def test_nested_resolve_does_not_deadlock():
-    async with push_inject_scope():
+    async with injection_ctx():
         async with asyncio.timeout(5):
             session = await resolve(nested_resolve_dep)
 

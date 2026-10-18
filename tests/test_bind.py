@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 
 from fastapi_injected import (
     Given,
-    add_injected_scope,
+    add_injection,
     bind_deps,
     inject,
-    push_inject_scope,
+    injection_ctx,
     push_overrides,
     resolve,
     signature_with_deps,
@@ -67,13 +67,13 @@ async def test_bound_dependencies_can_be_overridden():
         assert await resolve(bound) == "readme:guest"
 
 
-async def test_bound_dependencies_share_the_scope_cache():
+async def test_bound_dependencies_share_the_ctx_cache():
     async def which(role: Role) -> Role:
         return role
 
     bound = bind_deps(which, RoleDep)
 
-    async with push_inject_scope():
+    async with injection_ctx():
         assert await resolve(bound) is await resolve(bound)
 
 
@@ -112,7 +112,7 @@ async def test_a_request_marker_is_bound_as_written() -> None:
 
 async def test_a_request_marker_resolves_from_the_request() -> None:
     app = FastAPI()
-    add_injected_scope(app)
+    add_injection(app)
 
     @app.get("/marker")
     async def _route(described: Annotated[str, Depends(bind_deps(titled, TitleHeader, RoleDep))]) -> str:

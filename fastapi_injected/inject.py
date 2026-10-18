@@ -2,8 +2,8 @@ import inspect
 from functools import partial, wraps
 from typing import overload
 
-from .deps import create_dependant, resolve_dependencies
-from .scope import inside_inject_scope
+from .ctx import ensure_injection_ctx
+from .deps import create_dependant, solve_arguments
 from .signature import Signature
 from .types import AsyncDecorator, AsyncFunc
 
@@ -19,7 +19,7 @@ def inject[**P, R](
 @overload
 def inject[**P, R](
     *,
-    new_scope: bool = False,
+    new_ctx: bool = False,
 ) -> AsyncDecorator[P, R]:
     pass
 
@@ -28,19 +28,19 @@ def inject[**P, R](
     func: AsyncFunc[P, R] | None = None,
     /,
     *,
-    new_scope: bool = False,
+    new_ctx: bool = False,
 ) -> AsyncFunc[P, R] | AsyncDecorator[P, R]:
     if func is None:
-        return partial(inject, new_scope=new_scope)  # type: ignore[ty:invalid-return-type]
+        return partial(inject, new_ctx=new_ctx)  # type: ignore[ty:invalid-return-type]
 
     dependant = create_dependant(func)
 
     @wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        async with inside_inject_scope(
-            new_scope=new_scope,
-        ) as inject_scope:
-            solved = await resolve_dependencies(dependant, inject_scope)
+        async with ensure_injection_ctx(
+            new_ctx=new_ctx,
+        ) as ctx:
+            solved = await solve_arguments(dependant, ctx)
 
             for key, value in solved.items():
                 kwargs.setdefault(key, value)

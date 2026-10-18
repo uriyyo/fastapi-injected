@@ -117,47 +117,47 @@ from fastapi_injected import resolve
 service = await resolve(Service)
 ```
 
-Like `@inject`, `resolve` accepts `new_scope=True` to force a fresh scope instead of reusing the surrounding one.
+Like `@inject`, `resolve` accepts `new_ctx=True` to force a fresh context instead of reusing the surrounding one.
 
-### Scopes and caching
+### Contexts and caching
 
-By default every call to an injected function gets its own scope: dependencies are built, cached within the call, and torn down when it returns. Wrap several calls in `push_inject_scope()` to share one cache (and defer teardown to the end of the scope):
+By default every call to an injected function gets its own injection context: dependencies are built, cached within the call, and torn down when it returns. Wrap several calls in `injection_ctx()` to share one cache (and defer teardown to the end of the context):
 
 ```python
-from fastapi_injected import push_inject_scope
+from fastapi_injected import injection_ctx
 
-async with push_inject_scope():
+async with injection_ctx():
     a = await handler()  # dependencies built here
     b = await handler()  # same instances reused
 # generator dependencies are torn down here
 ```
 
-Use `@inject(new_scope=True)` to opt a function out of the surrounding scope and always get fresh dependencies. It builds them again, but stays in the request they are being built for, so request-bound dependencies keep resolving.
+Use `@inject(new_ctx=True)` to opt a function out of the surrounding context and always get fresh dependencies. It builds them again, but stays in the request they are being built for, so request-bound dependencies keep resolving.
 
-Outside of a request there is no request to resolve against, so the scope makes one up. It answers what a dependency usually reads — `method`, `url`, `headers`, `path_params`, `client`, `state` — with the values of a request nobody sent. The application is the one thing it cannot invent: pass it when a dependency reaches for `request.app`:
+Outside of a request there is no request to resolve against, so the context makes one up. It answers what a dependency usually reads — `method`, `url`, `headers`, `path_params`, `client`, `state` — with the values of a request nobody sent. The application is the one thing it cannot invent: pass it when a dependency reaches for `request.app`:
 
 ```python
-async with push_inject_scope(app=app):
+async with injection_ctx(app=app):
     await handler()  # `request.app.state` resolves as it does in a route
 ```
 
 Without it, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
 
-When a dependency reads more of the request than that — a header, a cookie, a query or path parameter, the body — describe the request with `synthetic_request` and hand it to the scope:
+When a dependency reads more of the request than that — a header, a cookie, a query or path parameter, the body — describe the request with `synthetic_request` and hand it to the context:
 
 ```python
-from fastapi_injected import push_inject_scope, synthetic_request
+from fastapi_injected import injection_ctx, synthetic_request
 
 request = synthetic_request(
     headers={"x-trace": "job-42"},
     cookies={"sid": "abc"},
-    query={"page": "2"},
+    query_params={"page": "2"},
     path_params={"item_id": 7},
     body={"name": "readme"},  # sent as JSON; bytes and str are sent as they are
     app=app,
 )
 
-async with push_inject_scope(request=request):
+async with injection_ctx(request=request):
     await handler()  # `Header()`, `Cookie()`, `Query()`, `Path()` and `Body()` resolve from it
 ```
 
@@ -200,10 +200,10 @@ with push_overrides(
 
 Overrides apply to the whole graph, not just top-level parameters — overriding a nested dependency changes what its dependents receive. Nested `push_overrides` blocks merge, with the innermost one winning.
 
-An override block is a scope of its own: it caches what it builds, and that cache goes away with the block. The surrounding scope keeps what it had resolved before, and it stays visible — except for the overridden dependencies and anything built from them, which are resolved again under the override:
+An override block is a context of its own: it caches what it builds, and that cache goes away with the block. The surrounding context keeps what it had resolved before, and it stays visible — except for the overridden dependencies and anything built from them, which are resolved again under the override:
 
 ```python
-async with push_inject_scope():
+async with injection_ctx():
     real = await handler()  # dependencies cached here
 
     with push_overrides({Session: fake}):
@@ -212,13 +212,13 @@ async with push_inject_scope():
     await handler()  # back to the cached, real dependencies
 ```
 
-Overrides can also be handed to the scope directly, which is the same thing in one call:
+Overrides can also be handed to the context directly, which is the same thing in one call:
 
 ```python
-async with push_inject_scope({Session: fake}) as scope:
+async with injection_ctx({Session: fake}) as ctx:
     await handler()
 
-    with scope.override({Session: other}):  # nest freely
+    with ctx.override({Session: other}):  # nest freely
         await handler()
 ```
 
@@ -226,7 +226,7 @@ For FastAPI's own `app.dependency_overrides`, `override_app(app, {dep: fake})` s
 
 ### Dependencies that are objects
 
-Resolved values are cached in their scope by the callable that resolves them, so a dependency that is an object — a class holding configuration, a parametrized resolver — has to be hashable to get there. A plain dataclass is not, and a frozen one still refuses as soon as it holds a list or a dict.
+Resolved values are cached in their context by the callable that resolves them, so a dependency that is an object — a class holding configuration, a parametrized resolver — has to be hashable to get there. A plain dataclass is not, and a frozen one still refuses as soon as it holds a list or a dict.
 
 `MakeDataclass` is a base class that makes its subclasses dataclasses with a hash that always answers: by fields when they can be hashed, by identity when they cannot.
 
@@ -321,7 +321,7 @@ class IsOwner(MakeInjected):
 await resolve(IsOwner(doc=Given(doc), role=RoleDep))
 ```
 
-It is a `MakeDataclass`, so instances built from equal markers are equal — and therefore one dependency, resolved once per scope and overridable as a whole. For callables that are not dataclasses, the two halves of the binding are available on their own: `signature_with_deps(func, deps)` builds the signature, and `remap_dep_args` turns the arguments it names back into positional ones.
+It is a `MakeDataclass`, so instances built from equal markers are equal — and therefore one dependency, resolved once per context and overridable as a whole. For callables that are not dataclasses, the two halves of the binding are available on their own: `signature_with_deps(func, deps)` builds the signature, and `remap_dep_args` turns the arguments it names back into positional ones.
 
 ### Inspecting annotations
 
@@ -333,10 +333,10 @@ A few helpers are exported for code that needs to reason about `Dep[...]` annota
 
 ### Reflecting on apps and dependency trees
 
-`fastapi_injected.reflect` answers the questions tests and tooling keep asking about an app, without walking `Dependant` trees or `app.routes` by hand. Everything it exports is also importable from the package root.
+`fastapi_injected.reflect` answers the questions tests and tooling keep asking about an app, without walking `Dependant` trees or `app.routes` by hand.
 
 ```python
-from fastapi_injected import find_route, iter_api_routes, iter_calls, iter_security
+from fastapi_injected.reflect import find_route, iter_api_routes, iter_calls, iter_security
 
 # every APIRoute with its full path, through include_router, Mount and Host
 for path, route in iter_api_routes(app):
@@ -374,14 +374,14 @@ assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
 
 ### FastAPI request integration
 
-Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injected_scope`: it adds `InjectScopeMiddleware`, which opens the scope for the whole request, and the `init_inject_scope` dependency, which binds it to the connection of the route. Add it after your other middleware, so the scope is open for them too:
+Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injection`: it adds `InjectionMiddleware`, which opens the context for the whole request, and the `bind_injection_ctx` dependency, which binds it to the connection of the route. Add it after your other middleware, so the context is open for them too:
 
 ```python
 from fastapi import FastAPI
-from fastapi_injected import Dep, add_injected_scope, resolve
+from fastapi_injected import Dep, add_injection, resolve
 
 app = FastAPI()
-add_injected_scope(app)
+add_injection(app)
 
 
 @app.get("/")
@@ -390,9 +390,9 @@ async def route(service: Dep[Service]) -> str:
     ...
 ```
 
-Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request. The scope is opened by a middleware, so `resolve` also works inside middleware added before it (before routing, `request.scope["route"]` and path params are not available yet).
+Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request. The context is opened by a middleware, so `resolve` also works inside middleware added before it (before routing, `request.scope["route"]` and path params are not available yet).
 
-WebSocket routes work the same way: the scope is bound to the `WebSocket` instead of a `Request`, and dependencies that ask for one get it. A websocket handed to a dependency shares its handshake with the one the route received, so it can be talked through after the route has called `accept()`:
+WebSocket routes work the same way: the context is bound to the `WebSocket` instead of a `Request`, and dependencies that ask for one get it. A websocket handed to a dependency shares its handshake with the one the route received, so it can be talked through after the route has called `accept()`:
 
 ```python
 async def notify(websocket: WebSocket) -> None:
@@ -405,7 +405,7 @@ async def ws_route(websocket: WebSocket, service: Dep[Service]) -> None:
     await resolve(notify)  # sends through the connection the route accepted
 ```
 
-Dependencies that take request parameters — `Header()`, `Cookie()`, `Query()`, `Path()`, and the body as `Body()`, `Form()`, `File()` or a pydantic model — resolve from the request the scope is bound to, exactly as they would in the route:
+Dependencies that take request parameters — `Header()`, `Cookie()`, `Query()`, `Path()`, and the body as `Body()`, `Form()`, `File()` or a pydantic model — resolve from the request the context is bound to, exactly as they would in the route:
 
 ```python
 class Item(BaseModel):
@@ -436,9 +436,9 @@ async def handler(*, api_key: Annotated[str, Header()] = Injected) -> str:
     return api_key  # a parameter has a name - `x-api-key`, as FastAPI derives it
 ```
 
-The body is read only when the resolved dependency declares one, and it is read once per request, shared with the route and every scope nested in it. When the route itself declares a body, dependencies see it in the shape the route gave it: a route with several body parameters embeds them under their names, and a dependency reads its own from there.
+The body is read only when the resolved dependency declares one, and it is read once per request, shared with the route and every context nested in it. When the route itself declares a body, dependencies see it in the shape the route gave it: a route with several body parameters embeds them under their names, and a dependency reads its own from there.
 
-`push_inject_scope(request=...)` accepts either a `Request` or a `WebSocket`, and so does everything that reads `InjectScope.request` — the union is `fastapi_injected.types.BoundConnection`.
+`injection_ctx(request=...)` accepts either a `Request` or a `WebSocket`, and so does everything that reads `InjectionContext.request` — the union is `fastapi_injected.types.BoundConnection`.
 
 ## What is public
 
@@ -448,11 +448,11 @@ Everything the package supports is importable from `fastapi_injected` itself, an
 | --- | --- |
 | Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
 | Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
-| Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `synthetic_request`, `push_overrides`, `override_app`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
+| Contexts and overrides | `InjectionContext`, `injection_ctx`, `ensure_injection_ctx`, `synthetic_request`, `push_overrides`, `override_app`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
 | Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `strip_annotation`, `as_depends` |
-| FastAPI integration | `add_injected_scope`, `InjectScopeMiddleware`, `init_inject_scope` |
+| FastAPI integration | `add_injection`, `InjectionMiddleware`, `bind_injection_ctx` |
 | Reflection | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `Signature`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
-| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundScopeError`, `UnnamedParamError` |
+| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundContextError`, `UnnamedParamError` |
 
 `fastapi_injected.types` holds the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro` and friends — and is public too. Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
 

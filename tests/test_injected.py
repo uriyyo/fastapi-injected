@@ -5,7 +5,7 @@ from typing import Annotated
 import pytest
 from fastapi import Depends
 
-from fastapi_injected import Given, MakeInjected, push_inject_scope, push_overrides, resolve
+from fastapi_injected import Given, MakeInjected, injection_ctx, push_overrides, resolve
 from fastapi_injected.types import DepOf
 
 pytestmark = pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_what_it_depends_on_can_be_overridden():
 
 
 async def test_equal_instances_are_one_dependency():
-    async with push_inject_scope():
+    async with injection_ctx():
         first = IsOwner(doc=Given(Doc("same")), role=RoleDep)
         second = IsOwner(doc=Given(Doc("same")), role=RoleDep)
 

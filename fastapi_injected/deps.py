@@ -2,7 +2,7 @@ import inspect
 from collections.abc import Callable, Generator
 from contextlib import AsyncExitStack, contextmanager
 from functools import lru_cache
-from typing import Any, Literal, cast, get_args, overload
+from typing import Any, cast, get_args
 
 from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from ._body import InvalidBodyError, request_body
 from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation, release
 from ._deps_tp import is_dep, is_request_param, unwrap_tp
-from .scope import InjectScope
+from .ctx import InjectionContext
 from .signature import Signature
 from .types import Coro, DependencyCache, HasDependsHook, HasSignature
 
@@ -51,23 +51,23 @@ def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
 
 
 @contextmanager
-def single_dependant[**P, R](
-    func: Callable[P, R] | HasDependsHook[P, R],
+def open_dependant[**P, R](
+    tp: Callable[P, R] | HasDependsHook[P, R],
     /,
     *,
     path: str | None = None,
 ) -> Generator[Dependant]:
-    match func:
-        case _ if is_dep(func):
-            annotation = unwrap_tp(func)
-        case _ if is_request_param(func):
-            annotation = _named_param(unwrap_tp(func))
+    match tp:
+        case _ if is_dep(tp):
+            annotation = unwrap_tp(tp)
+        case _ if is_request_param(tp):
+            annotation = _named_param(unwrap_tp(tp))
         case params.Param() | params.Body():
-            annotation = _named_param(annotated(Any, func))
+            annotation = _named_param(annotated(Any, tp))
         case HasDependsHook():
-            annotation = annotated(Any, func.__get_depends__())
+            annotation = annotated(Any, tp.__get_depends__())
         case _:
-            annotation = annotated(Any, Depends(func))
+            annotation = annotated(Any, Depends(tp))
 
     if is_static_annotation(annotation):
         yield _create_annotation_dependant(annotation, path=path)
@@ -114,7 +114,7 @@ def _value_factory(annotation: Any, /) -> Callable[..., Coro[Any]]:
     async def _factory(__value__: Any) -> Any:
         return __value__
 
-    cast("HasSignature", _factory).__signature__ = inspect.Signature(
+    cast(HasSignature, _factory).__signature__ = inspect.Signature(
         parameters=[
             inspect.Parameter(
                 "__value__",
@@ -140,41 +140,21 @@ def clear_dependant_cache() -> None:
     _create_annotation_dependant.cache_clear()
 
 
-@overload
-async def resolve_dependencies(
+async def solve_arguments(
     dependant: Dependant,
-    scope: InjectScope,
-    *,
-    single: Literal[False] = False,
-) -> dict[str, Any]: ...
-
-
-@overload
-async def resolve_dependencies(
-    dependant: Dependant,
-    scope: InjectScope,
-    *,
-    single: Literal[True],
-) -> Any: ...
-
-
-async def resolve_dependencies(
-    dependant: Dependant,
-    scope: InjectScope,
-    *,
-    single: bool = False,
+    ctx: InjectionContext,
 ) -> dict[str, Any]:
     proxies: list[CallProxy] = []
 
     try:
-        async with scope.lock:
-            body, embed_body_fields = await request_body(scope.bound_request, dependant)
+        async with ctx.lock:
+            body, embed_body_fields = await request_body(ctx.bound_request, dependant)
 
             solved = await solve_dependencies(
-                request=scope.bound_request,
+                request=ctx.bound_request,
                 dependant=dependant,
-                dependency_cache=cast("DependencyCache", scope.cache_for(dependant)),
-                dependency_overrides_provider=DetachedOverrides(scope.dependency_overrides, proxies),
+                dependency_cache=cast("DependencyCache", ctx.cache_for(dependant)),
+                dependency_overrides_provider=DetachedOverrides(ctx.dependency_overrides, proxies),
                 # this parameter is deprecated and not used
                 async_exit_stack=cast(AsyncExitStack, None),
                 body=body,
@@ -188,13 +168,19 @@ async def resolve_dependencies(
     if solved.errors:
         raise DependencyResolutionError(solved.errors)
 
-    if single:
-        try:
-            return solved.values["__value__"]
-        except KeyError:
-            raise MissedDependencyError("__value__") from None
-
     return solved.values
+
+
+async def solve_value(
+    dependant: Dependant,
+    ctx: InjectionContext,
+) -> Any:
+    values = await solve_arguments(dependant, ctx)
+
+    try:
+        return values["__value__"]
+    except KeyError:
+        raise MissedDependencyError("__value__") from None
 
 
 __all__ = [
@@ -204,6 +190,7 @@ __all__ = [
     "UnnamedParamError",
     "clear_dependant_cache",
     "create_dependant",
-    "resolve_dependencies",
-    "single_dependant",
+    "open_dependant",
+    "solve_arguments",
+    "solve_value",
 ]

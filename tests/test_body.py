@@ -24,9 +24,9 @@ from starlette.types import Message
 from fastapi_injected import (
     DependencyResolutionError,
     Injected,
-    add_injected_scope,
+    add_injection,
     inject,
-    push_inject_scope,
+    injection_ctx,
     resolve,
     synthetic_request,
 )
@@ -83,7 +83,7 @@ type ItemID = Annotated[int, Depends(_item_id)]
 
 app = FastAPI()
 
-add_injected_scope(app)
+add_injection(app)
 client = TestClient(app)
 
 
@@ -127,13 +127,13 @@ async def upload() -> str:
 
 @app.post("/nested")
 async def nested() -> list[str]:
-    @inject(new_scope=True)
+    @inject(new_ctx=True)
     async def _fresh(*, item: ItemDep = Injected) -> str:
         return item.name
 
     first = await _fresh()
 
-    async with push_inject_scope():
+    async with injection_ctx():
         second = (await resolve(ItemDep)).name
 
     return [first, second]
@@ -196,7 +196,7 @@ def test_uploaded_file() -> None:
     assert client.post("/upload", files={"file": ("f.txt", b"content")}).json() == "content"
 
 
-def test_nested_scopes_share_the_body() -> None:
+def test_nested_ctxs_share_the_body() -> None:
     assert client.post("/nested", json={"name": "f"}).json() == ["f", "f"]
 
 
@@ -225,12 +225,12 @@ async def test_synthetic_request_carries_request_parameters():
     request = synthetic_request(
         headers={"X-Trace": "t"},
         cookies={"sid": "s"},
-        query={"page": "3"},
+        query_params={"page": "3"},
         path_params={"item_id": 7},
     )
 
-    async with push_inject_scope(request=request) as scope:
-        assert scope.synthetic
+    async with injection_ctx(request=request) as ctx:
+        assert ctx.synthetic
         assert [await resolve(Trace), await resolve(Session), await resolve(Page), await resolve(ItemID)] == [
             "t",
             "s",
@@ -241,23 +241,23 @@ async def test_synthetic_request_carries_request_parameters():
 
 @pytest.mark.asyncio
 async def test_synthetic_request_json_body():
-    async with push_inject_scope(request=synthetic_request(body={"name": "g"})):
+    async with injection_ctx(request=synthetic_request(body={"name": "g"})):
         assert await resolve(ItemDep) == Item(name="g")
-        assert await resolve(ItemDep, new_scope=True) == Item(name="g")
+        assert await resolve(ItemDep, new_ctx=True) == Item(name="g")
 
 
 @pytest.mark.asyncio
 async def test_synthetic_request_model_body():
-    async with push_inject_scope(request=synthetic_request(body=Item(name="h"))):
+    async with injection_ctx(request=synthetic_request(body=Item(name="h"))):
         assert await resolve(ItemDep) == Item(name="h")
 
 
 @pytest.mark.asyncio
 async def test_synthetic_request_raw_body():
-    async with push_inject_scope(request=synthetic_request(body=b"raw")):
+    async with injection_ctx(request=synthetic_request(body=b"raw")):
         assert await resolve(_raw) == b"raw"
 
-    async with push_inject_scope(request=synthetic_request(body="text")):
+    async with injection_ctx(request=synthetic_request(body="text")):
         assert await resolve(_raw) == b"text"
 
 
@@ -268,7 +268,7 @@ async def test_synthetic_request_form_body():
         headers={"content-type": "application/x-www-form-urlencoded"},
     )
 
-    async with push_inject_scope(request=request):
+    async with injection_ctx(request=request):
         assert await resolve(FormName) == "i"
 
 
@@ -276,8 +276,8 @@ async def test_synthetic_request_form_body():
 async def test_synthetic_request_keeps_its_app():
     app = FastAPI()
 
-    async with push_inject_scope(request=synthetic_request(app=app)) as scope:
-        assert scope.bound_request.app is app
+    async with injection_ctx(request=synthetic_request(app=app)) as ctx:
+        assert ctx.bound_request.app is app
 
 
 @pytest.mark.asyncio
@@ -304,9 +304,9 @@ async def test_body_is_read_once():
 
     request._receive = _counting_receive  # noqa: SLF001
 
-    async with push_inject_scope(request=request):
+    async with injection_ctx(request=request):
         assert await resolve(ItemDep) == Item(name="j")
-        assert await resolve(EmbeddedName, new_scope=True) == "j"
+        assert await resolve(EmbeddedName, new_ctx=True) == "j"
 
     assert reads == 1
 
@@ -319,10 +319,10 @@ async def _streamed(request: Request) -> bytes:
 async def test_rebound_request_streams_and_closes_through_the_original():
     request = synthetic_request(body=b"streamed")
 
-    async with push_inject_scope(request=request) as scope:
+    async with injection_ctx(request=request) as ctx:
         assert await resolve(_streamed) == b"streamed"
 
-        await scope.bound_request.close()
+        await ctx.bound_request.close()
 
 
 @pytest.mark.parametrize(
@@ -340,7 +340,7 @@ async def test_body_that_is_not_json_is_kept_raw(body: bytes, headers: dict[str,
     async def _received(item: Annotated[bytes | None, Body()] = None) -> bytes | None:
         return item
 
-    async with push_inject_scope(request=synthetic_request(body=body, headers=headers)):
+    async with injection_ctx(request=synthetic_request(body=body, headers=headers)):
         assert await resolve(_received) == expected
 
 
@@ -358,11 +358,11 @@ async def test_form_is_closed_once_per_request(monkeypatch: pytest.MonkeyPatch):
 
     request = synthetic_request(body="name=l", headers={"content-type": "application/x-www-form-urlencoded"})
 
-    async with push_inject_scope(request=request):
+    async with injection_ctx(request=request):
         assert await resolve(FormName) == "l"
 
-        async with push_inject_scope():
-            assert await resolve(FormName, new_scope=True) == "l"
+        async with injection_ctx():
+            assert await resolve(FormName, new_ctx=True) == "l"
 
     assert closed == 1
 
@@ -380,10 +380,10 @@ async def route_upload(file: Annotated[UploadFile, File()]) -> list[str]:
 
 @app.post("/route-body-nested")
 async def route_body_nested(item: Item) -> list[str]:
-    async with push_inject_scope():
+    async with injection_ctx():
         nested = (await resolve(ItemDep)).name
 
-    return [item.name, nested, (await resolve(ItemDep, new_scope=True)).name]
+    return [item.name, nested, (await resolve(ItemDep, new_ctx=True)).name]
 
 
 @app.post("/route-body-invalid")
@@ -446,7 +446,7 @@ def test_upload_the_route_read_is_resolved() -> None:
     assert client.post("/route-upload", files={"file": ("n.txt", b"n")}).json() == ["n.txt", "n"]
 
 
-def test_nested_scopes_in_a_route_share_its_body() -> None:
+def test_nested_ctxs_in_a_route_share_its_body() -> None:
     assert client.post("/route-body-nested", json={"name": "o"}).json() == ["o", "o", "o"]
 
 
@@ -473,7 +473,7 @@ def test_websocket_has_no_body() -> None:
 
 
 @pytest.mark.asyncio
-async def test_synthetic_request_closes_the_form_with_its_outermost_scope(monkeypatch: pytest.MonkeyPatch):
+async def test_synthetic_request_closes_the_form_with_its_outermost_ctx(monkeypatch: pytest.MonkeyPatch):
     closed = 0
     close = FormData.close
 
@@ -486,11 +486,11 @@ async def test_synthetic_request_closes_the_form_with_its_outermost_scope(monkey
 
     request = synthetic_request(body="name=r", headers={"content-type": "application/x-www-form-urlencoded"})
 
-    async with push_inject_scope(request=request):
-        async with push_inject_scope():
+    async with injection_ctx(request=request):
+        async with injection_ctx():
             assert await resolve(FormName) == "r"
 
-        # a nested scope read it first, it is still there for the one it is nested in
+        # a nested context read it first, it is still there for the one it is nested in
         assert closed == 0
         assert await resolve(FormName) == "r"
 
@@ -512,10 +512,10 @@ def test_header_with_an_alias() -> None:
 
 @pytest.mark.asyncio
 async def test_header_with_an_alias_on_a_synthetic_request():
-    async with push_inject_scope(request=synthetic_request(headers={"x-api-key": "secret"})):
+    async with injection_ctx(request=synthetic_request(headers={"x-api-key": "secret"})):
         assert await resolve(_api_key) == "secret"
 
-    async with push_inject_scope(request=synthetic_request()):
+    async with injection_ctx(request=synthetic_request()):
         with pytest.raises(DependencyResolutionError) as exc_info:
             await resolve(_api_key)
 

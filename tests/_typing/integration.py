@@ -2,7 +2,7 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI, Request, WebSocket
 
-from fastapi_injected import Dep, add_injected_scope, init_inject_scope
+from fastapi_injected import Dep, add_injection, bind_injection_ctx
 
 from .deps import (
     Child,
@@ -14,14 +14,14 @@ from .deps import (
 
 app = FastAPI()
 
-add_injected_scope(app)
+add_injection(app)
 
-static_assert(is_equivalent_to(TypeOf[add_injected_scope(app)], None))
+static_assert(is_equivalent_to(TypeOf[add_injection(app)], None))
 
 
-def _init_scope_is_a_generator_dependency(request: Request, websocket: WebSocket) -> None:
-    static_assert(is_equivalent_to(TypeOf[init_inject_scope(request)], AsyncGenerator[None]))
-    static_assert(is_equivalent_to(TypeOf[init_inject_scope(websocket)], AsyncGenerator[None]))
+def _init_ctx_is_a_generator_dependency(request: Request, websocket: WebSocket) -> None:
+    static_assert(is_equivalent_to(TypeOf[bind_injection_ctx(request)], AsyncGenerator[None]))
+    static_assert(is_equivalent_to(TypeOf[bind_injection_ctx(websocket)], AsyncGenerator[None]))
 
 
 @app.get("/")
@@ -34,7 +34,7 @@ async def route(container: Dep[Container]) -> str:
 
 
 def _negatives() -> None:
-    add_injected_scope()  # type: ignore[ty:missing-argument]
-    add_injected_scope(app=app)  # type: ignore[ty:positional-only-parameter-as-kwarg]
-    add_injected_scope(object())  # type: ignore[ty:invalid-argument-type]
-    init_inject_scope(object())  # type: ignore[ty:invalid-argument-type]
+    add_injection()  # type: ignore[ty:missing-argument]
+    add_injection(app=app)  # type: ignore[ty:positional-only-parameter-as-kwarg]
+    add_injection(object())  # type: ignore[ty:invalid-argument-type]
+    bind_injection_ctx(object())  # type: ignore[ty:invalid-argument-type]

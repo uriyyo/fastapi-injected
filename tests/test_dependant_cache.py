@@ -17,7 +17,7 @@ from fastapi_injected import (
     bind_deps,
     clear_dependant_cache,
     inject,
-    push_inject_scope,
+    injection_ctx,
     push_overrides,
     resolve,
 )
@@ -60,7 +60,7 @@ async def _resolve_through_hooks(count: int) -> list[weakref.ref[Hook]]:
         hook = Hook([0] * 100)
         refs.append(weakref.ref(hook))
 
-        async with push_inject_scope():
+        async with injection_ctx():
             await resolve(hook)
 
     return refs
@@ -155,7 +155,7 @@ async def test_values_resolved_at_runtime_are_not_kept_alive(make: Callable[[Pay
         payload = Payload()
         refs.append(weakref.ref(payload))
 
-        async with push_inject_scope():
+        async with injection_ctx():
             assert await resolve(make(payload)) is payload
 
         del payload
@@ -199,21 +199,21 @@ class Opened(Resolver):
         opened.clear()
 
 
-async def test_a_runtime_generator_is_torn_down_with_its_scope():
+async def test_a_runtime_generator_is_torn_down_with_its_ctx():
     payload = Payload()
 
-    async with push_inject_scope():
+    async with injection_ctx():
         opened = await resolve(Opened(payload))
         assert opened == [payload]
 
     assert opened == []
 
 
-async def test_a_runtime_dependency_shares_the_scope_cache_with_static_ones():
-    async with push_inject_scope():
+async def test_a_runtime_dependency_shares_the_ctx_cache_with_static_ones():
+    async with injection_ctx():
         foo = await resolve(FooDep)
 
-        # the runtime dependency hands its `foo` back through the same scope cache
+        # the runtime dependency hands its `foo` back through the same ctx cache
         class Peek(MakeInjected):
             foo: DepOf[Foo]
 

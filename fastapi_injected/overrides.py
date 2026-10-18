@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 from ._dataclass import MakeDataclass
 from ._overrides import FactoryOverride, Overrides, ValueOverride, normalize_overrides
-from .scope import InjectScope
+from .ctx import InjectionContext
 from .types import HasDependencyOverrides
 
 
@@ -19,10 +19,10 @@ def push_overrides(
     /,
     *,
     provider: HasDependencyOverrides | None = None,
-) -> Generator[InjectScope]:
-    scope = InjectScope.current() or InjectScope()
+) -> Generator[InjectionContext]:
+    ctx = InjectionContext.current() or InjectionContext()
 
-    with scope.override(overrides, provider=provider) as child:
+    with ctx.override(overrides, provider=provider) as child:
         yield child
 
 

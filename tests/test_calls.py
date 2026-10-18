@@ -5,7 +5,7 @@ from typing import Annotated, Any
 import pytest
 from fastapi import Depends
 
-from fastapi_injected import push_inject_scope, resolve
+from fastapi_injected import injection_ctx, resolve
 from fastapi_injected._calls import CallProxy, DetachedOverrides, is_static_annotation, is_static_call
 
 pytestmark = pytest.mark.asyncio
@@ -91,7 +91,7 @@ class Defaulted:
 
 
 async def test_a_dependency_written_as_a_default_is_detached_too():
-    async with push_inject_scope():
+    async with injection_ctx():
         assert await resolve(Defaulted(41)) == 42
 
 

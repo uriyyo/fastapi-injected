@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from fastapi_injected import ValueOverride, push_inject_scope, push_overrides, resolve
+from fastapi_injected import ValueOverride, injection_ctx, push_overrides, resolve
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -86,13 +86,13 @@ async def test_push_overrides_provider_fallback_to_outer_provider():
     assert container.child is outer
 
 
-async def test_push_overrides_inside_a_used_scope():
-    async with push_inject_scope():
+async def test_push_overrides_inside_a_used_ctx():
+    async with injection_ctx():
         before = await resolve(Container)
 
         child = Child()
         with push_overrides({Child: ValueOverride(child)}):
-            # the override applies even though the scope has already resolved the graph
+            # the override applies even though the context has already resolved the graph
             overridden = await resolve(Container)
 
             assert overridden.child is child
@@ -103,7 +103,7 @@ async def test_push_overrides_inside_a_used_scope():
 
 
 async def test_push_overrides_reuses_what_it_does_not_override():
-    async with push_inject_scope():
+    async with injection_ctx():
         before = await resolve(Container)
 
         with push_overrides({Child: ValueOverride(Child())}):
@@ -112,7 +112,7 @@ async def test_push_overrides_reuses_what_it_does_not_override():
 
 
 async def test_push_overrides_caches_inside_the_block():
-    async with push_inject_scope():
+    async with injection_ctx():
         with push_overrides({Child: ValueOverride(Child())}):
             first = await resolve(Container)
             second = await resolve(Container)

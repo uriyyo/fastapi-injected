@@ -50,12 +50,12 @@ async def _resolve_a_depends_hook() -> None:
 
 
 async def _resolve_options() -> None:
-    static_assert(is_equivalent_to(TypeOf[await resolve(Container, new_scope=True)], Container))
+    static_assert(is_equivalent_to(TypeOf[await resolve(Container, new_ctx=True)], Container))
 
 
 async def _negatives() -> None:
     await resolve(Container, True)  # type: ignore[ty:no-matching-overload]
-    await resolve(Container, new_scope="yes")  # type: ignore[ty:no-matching-overload]
+    await resolve(Container, new_ctx="yes")  # type: ignore[ty:no-matching-overload]
     await resolve()  # type: ignore[ty:no-matching-overload]
 
     # what `resolve` returns is the dependency, not the marker

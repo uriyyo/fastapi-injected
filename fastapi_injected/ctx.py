@@ -21,16 +21,16 @@ from starlette.requests import HTTPConnection
 from starlette.types import Message, Scope
 from starlette.websockets import WebSocketState
 
-from ._cache import ScopeCache, overridden_calls
+from ._cache import ContextCache, overridden_calls
 from ._dataclass import MakeDataclass
 from ._overrides import Overrides, normalize_overrides
 from ._rlock import RLock
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 
-class UnboundScopeError(Exception):
+class UnboundContextError(Exception):
     def __init__(self) -> None:
-        super().__init__("Scope is not bound to a request")
+        super().__init__("Injection context is not bound to a request")
 
 
 _SYNTHETIC_REQUEST_KEY = "__fastapi_injected_synthetic_request__"
@@ -40,7 +40,7 @@ class _SyntheticScope(dict[str, Any]):
     def __missing__(self, key: str) -> Any:
         raise KeyError(
             f"{key!r} is not part of a synthetic request - "
-            f"pass request= (or app=) to push_inject_scope() to resolve against a real one",
+            f"pass request= (or app=) to injection_ctx() to resolve against a real one",
         )
 
 
@@ -184,7 +184,7 @@ def synthetic_request(  # noqa: PLR0913
     *,
     app: FastAPI | None = None,
     headers: Mapping[str, str] | None = None,
-    query: Mapping[str, str | Sequence[str]] | None = None,
+    query_params: Mapping[str, str | Sequence[str]] | None = None,
     cookies: Mapping[str, str] | None = None,
     path_params: Mapping[str, Any] | None = None,
     body: Any = None,
@@ -196,7 +196,7 @@ def synthetic_request(  # noqa: PLR0913
         body=raw_body,
         extra_scope={
             "headers": _raw_headers(headers or {}, cookies or {}, content_type=content_type),
-            "query_string": urlencode(query or {}, doseq=True).encode("latin-1"),
+            "query_string": urlencode(query_params or {}, doseq=True).encode("latin-1"),
             "path_params": dict(path_params or {}),
         },
     )
@@ -216,18 +216,18 @@ def _rebind_request(
     return _ReboundRequest(request, scope=scope)
 
 
-class InjectScope(MakeDataclass):
+class InjectionContext(MakeDataclass):
     dependency_cache: DependencyCache = field(default_factory=dict)
     request: BoundConnection | None = None
 
     parent: Self | None = field(default=None, repr=False)
-    overrides: MutableMapping[Any, Any] = field(default_factory=dict, repr=False)
+    own_overrides: MutableMapping[Any, Any] = field(default_factory=dict, repr=False)
     inherit_cache: bool = field(default=False, repr=False)
     lock: RLock = field(default_factory=RLock, repr=False)
 
     @classmethod
     def current(cls) -> Self | None:
-        return cast(Self | None, _inject_scope.get())
+        return cast(Self | None, _injection_ctx.get())
 
     @property
     def bound(self) -> bool:
@@ -236,22 +236,22 @@ class InjectScope(MakeDataclass):
     @property
     def bound_request(self) -> BoundConnection:
         if self.request is None:
-            raise UnboundScopeError
+            raise UnboundContextError
 
         return self.request
 
     @property
-    def scopes(self) -> Iterator[Self]:
-        scope: Self | None = self
+    def chain(self) -> Iterator[Self]:
+        ctx: Self | None = self
 
-        while scope is not None:
-            yield scope
-            scope = scope.parent
+        while ctx is not None:
+            yield ctx
+            ctx = ctx.parent
 
     @property
     def dependency_overrides(self) -> MutableMapping[Any, Any]:
-        # the innermost scope wins, and every scope it is nested in is a fallback
-        return ChainMap(*[scope.overrides for scope in self.scopes])
+        # the innermost context wins, and every context it is nested in is a fallback
+        return ChainMap(*[ctx.own_overrides for ctx in self.chain])
 
     @property
     def path_format(self) -> str | None:
@@ -269,24 +269,24 @@ class InjectScope(MakeDataclass):
         return bool(self.request.scope.get(_SYNTHETIC_REQUEST_KEY, False))
 
     @property
-    def cache_scopes(self) -> Iterator[Self]:
-        scope = self
+    def inherited_cache_ctxs(self) -> Iterator[Self]:
+        ctx = self
 
-        while scope.inherit_cache and scope.parent is not None:
-            scope = scope.parent
-            yield scope
+        while ctx.inherit_cache and ctx.parent is not None:
+            ctx = ctx.parent
+            yield ctx
 
-    def cache_for(self, dependant: Dependant, /) -> ScopeCache:
+    def cache_for(self, dependant: Dependant, /) -> ContextCache:
         fallbacks = []
-        introduced: set[Any] = set(self.overrides)
+        introduced: set[Any] = set(self.own_overrides)
 
-        # an outer scope resolved under the overrides it could see, so only the ones
+        # an outer context resolved under the overrides it could see, so only the ones
         # pushed after it invalidate what it has cached
-        for scope in self.cache_scopes:
-            fallbacks.append((scope.dependency_cache, overridden_calls(dependant, introduced)))
-            introduced |= set(scope.overrides)
+        for ctx in self.inherited_cache_ctxs:
+            fallbacks.append((ctx.dependency_cache, overridden_calls(dependant, introduced)))
+            introduced |= set(ctx.own_overrides)
 
-        return ScopeCache(self.dependency_cache, fallbacks)
+        return ContextCache(self.dependency_cache, fallbacks)
 
     def override(
         self,
@@ -295,35 +295,35 @@ class InjectScope(MakeDataclass):
         *,
         provider: HasDependencyOverrides | None = None,
     ) -> AbstractContextManager[Self]:
-        return _push_scope(
+        return _enter_ctx(
             replace(
                 self,
                 parent=self,
                 dependency_cache={},
                 inherit_cache=True,
-                overrides=normalize_overrides(overrides, provider=provider),
+                own_overrides=normalize_overrides(overrides, provider=provider),
             ),
         )
 
 
-_inject_scope: ContextVar[InjectScope | None] = ContextVar(
-    "_inject_scope",
+_injection_ctx: ContextVar[InjectionContext | None] = ContextVar(
+    "_injection_ctx",
     default=None,
 )
 
 
 @contextmanager
-def _push_scope[S: InjectScope](scope: S, /) -> Generator[S]:
-    token = _inject_scope.set(scope)
+def _enter_ctx[S: InjectionContext](ctx: S, /) -> Generator[S]:
+    token = _injection_ctx.set(ctx)
 
     try:
-        yield scope
+        yield ctx
     finally:
-        _inject_scope.reset(token)
+        _injection_ctx.reset(token)
 
 
 @asynccontextmanager
-async def push_inject_scope(
+async def injection_ctx(
     overrides: Overrides | None = None,
     /,
     *,
@@ -331,13 +331,13 @@ async def push_inject_scope(
     request: BoundConnection | None = None,
     app: FastAPI | None = None,
     provider: HasDependencyOverrides | None = None,
-) -> AsyncGenerator[InjectScope]:
+) -> AsyncGenerator[InjectionContext]:
     if dependency_cache is None:
         dependency_cache = {}
 
-    parent = InjectScope.current()
+    parent = InjectionContext.current()
 
-    # a scope of its own is about building dependencies again, not about leaving the
+    # a context of its own is about building dependencies again, not about leaving the
     # request they are built for
     if request is None and parent is not None:
         request = parent.request
@@ -356,37 +356,37 @@ async def push_inject_scope(
 
         request.scope.setdefault("fastapi_middleware_astack", stack)
 
-        scope = InjectScope(
+        ctx = InjectionContext(
             dependency_cache,
             request,
             parent=parent,
-            overrides=normalize_overrides(overrides, provider=provider),
+            own_overrides=normalize_overrides(overrides, provider=provider),
         )
 
-        with _push_scope(scope):
-            yield scope
+        with _enter_ctx(ctx):
+            yield ctx
 
 
 @asynccontextmanager
-async def inside_inject_scope(
+async def ensure_injection_ctx(
     *,
-    new_scope: bool = False,
-) -> AsyncGenerator[InjectScope]:
-    scope = InjectScope.current()
+    new_ctx: bool = False,
+) -> AsyncGenerator[InjectionContext]:
+    ctx = InjectionContext.current()
 
     async with AsyncExitStack() as stack:
-        # a scope that carries only overrides has no request to resolve against,
-        # so resolution happens in a scope of its own that inherits them
-        if scope is None or new_scope or not scope.bound:
-            scope = await stack.enter_async_context(push_inject_scope())
+        # a context that carries only overrides has no request to resolve against,
+        # so resolution happens in a context of its own that inherits them
+        if ctx is None or new_ctx or not ctx.bound:
+            ctx = await stack.enter_async_context(injection_ctx())
 
-        yield scope
+        yield ctx
 
 
 __all__ = [
-    "InjectScope",
-    "UnboundScopeError",
-    "inside_inject_scope",
-    "push_inject_scope",
+    "InjectionContext",
+    "UnboundContextError",
+    "ensure_injection_ctx",
+    "injection_ctx",
     "synthetic_request",
 ]
