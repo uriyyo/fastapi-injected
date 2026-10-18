@@ -1,12 +1,12 @@
 import inspect
 from collections.abc import Callable, Generator
 from contextlib import AsyncExitStack, contextmanager
-from functools import lru_cache, wraps
-from typing import Any, Literal, Protocol, cast, get_args, overload, runtime_checkable
+from functools import lru_cache
+from typing import Any, Literal, cast, get_args, overload
 
 from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
-from fastapi.dependencies.utils import get_dependant, get_typed_signature, solve_dependencies
+from fastapi.dependencies.utils import get_dependant, solve_dependencies
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
@@ -14,8 +14,8 @@ from ._body import InvalidBodyError, request_body
 from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation, release
 from ._deps_tp import is_dep, is_request_param, unwrap_tp
 from .scope import InjectScope
-from .sign import prepare_sign, update_func_sign
-from .types import Coro, DependencyCache, HasSignature
+from .signature import Signature
+from .types import Coro, DependencyCache, HasDependsHook, HasSignature
 
 
 class DependencyResolutionError(ValueError):
@@ -43,28 +43,10 @@ class MissedDependencyError(ValueError):
         self.name = name
 
 
-@runtime_checkable
-class HasDependsHook[**P, R](Protocol):
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
-        pass
-
-    def __get_depends__(self) -> params.Depends:
-        pass
-
-
 def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
-    @wraps(func)
-    async def __call(*args: P.args, **kwargs: P.kwargs) -> R:
-        return await func(*args, **kwargs)
-
-    update_func_sign(
-        __call,
-        prepare_sign(get_typed_signature(func)),
-    )
-
     return get_dependant(
         path="",
-        call=__call,
+        call=Signature.of(func).prepare().wrap(func),
     )
 
 

@@ -222,6 +222,8 @@ async with push_inject_scope({Session: fake}) as scope:
         await handler()
 ```
 
+For FastAPI's own `app.dependency_overrides`, `override_app(app, {dep: fake})` sets entries for a `with` block and restores the previous mapping afterwards, including entries added inside the block.
+
 ### Dependencies that are objects
 
 Resolved values are cached in their scope by the callable that resolves them, so a dependency that is an object — a class holding configuration, a parametrized resolver — has to be hashable to get there. A plain dataclass is not, and a frozen one still refuses as soon as it holds a list or a dict.
@@ -329,6 +331,47 @@ A few helpers are exported for code that needs to reason about `Dep[...]` annota
 - `unwrap_dep_tp(tp)` — the annotated type (`Any` for a bare `Dep`).
 - `unwrap_dep_dependency(tp)` — the callable that resolves it: the factory for `DepFactory[T, factory]`, the type itself for `Dep[T]`.
 
+### Reflecting on apps and dependency trees
+
+`fastapi_injected.reflect` answers the questions tests and tooling keep asking about an app, without walking `Dependant` trees or `app.routes` by hand. Everything it exports is also importable from the package root.
+
+```python
+from fastapi_injected import find_route, iter_api_routes, iter_calls, iter_security
+
+# every APIRoute with its full path, through include_router, Mount and Host
+for path, route in iter_api_routes(app):
+    assert get_current_user in iter_calls(route.dependant), path
+
+route = find_route(app, method="POST", path="/items")  # or name="create_item"
+
+# security schemes a route (or any callable) pulls in, with their OAuth scopes
+assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
+```
+
+- `iter_dependant(root, *, mode="bfs" | "dfs")` — every `Dependant` under `root`, the root first.
+- `iter_calls(root, *, expand=None)` — unique callables `root` depends on, the root itself excluded. `expand(call)` returns extra calls to report for callables that hold more dependencies than their signature shows, such as composite permissions.
+- `iter_security(root)` — `(scheme, scopes)` for every `SecurityBase` in the tree.
+- `find_dependant(root, call)` — the chain of dependants from the root down to `call`, for saying *through what* a dependency is reached.
+- `iter_overridden(root, overrides)` — the calls an override map or collection replaces, including every dependant above a replaced one, which is what stops caching across an override.
+- `iter_routes(app)` — `(path, route)` for every route, with mounts, hosts and included routers expanded and the path prefixed accordingly. `iter_api_routes` keeps only FastAPI's HTTP and websocket routes, and `find_route(app, *, method=, path=, name=)` returns the first one matching every given filter, raising `LookupError` otherwise. Websocket routes answer to the method `WEBSOCKET`.
+- `iter_routes_where(app, pred)` — `(method, path, route)` for every route `pred` accepts, one entry per method. The usual authorization test is `iter_routes_where(app, lambda r: guard not in iter_calls(r.dependant))`.
+- `iter_operations(app_or_schema)` and `operation_for(app_or_schema, method, path)` — walk the OpenAPI document by `(path, method, operation)` instead of indexing nested dicts.
+- `iter_routers(app)` — `(prefix, router)` for the app's router and every router included or mounted under it.
+- `match_route(app, request_or_scope)` — `(path_template, route)` for the route that would handle a request, through mounts, hosts and included routers; `None` when nothing matches. Useful in middleware, where `request.scope["route"]` is not set yet.
+- `iter_params(root)` — `(dependant, kind, field)` for every path, query, header, cookie and body parameter in the tree.
+- `response_type(route, *, strip=True)` — the route's response type, falling back to the endpoint's return annotation, with `Annotated` and `| None` stripped unless `strip=False`.
+- `Signature`, in `fastapi_injected.signature`, is an `inspect.Signature` with operations for decorators and dependencies that need FastAPI to see parameters a function did not declare. `Signature.of(func_or_signature)` starts one; each operation returns a new `Signature`, and `.apply(func)` sets it on a function.
+  - `.add(*parameters)` — extra keyword-only parameters before `**kwargs`; names already present are kept as they are.
+  - `.drop(*names)` and `.update(name, **changes)` — drop parameters a wrapper consumes itself, or change one parameter's annotation, default or kind.
+  - `.add_dep(name, dep, *, annotation=Any)` — a parameter FastAPI resolves with a `Depends`/`Security` marker or a callable.
+  - `.prepend(*parameters)`, `.rename(old, new)` and `.returns(annotation)` — positional parameters at the front, a renamed parameter, a new return annotation.
+  - `Signature.role(parameter)` — which `ParamRole` a parameter plays: `dep` for `Dep[...]` or a `Depends` default, `request` for `Header()`/`Query()`/..., `arg` for `Arg[...]`, `plain` otherwise. `.select(*roles)` yields the parameters with those roles; `.annotations` and `.defaults` are name-to-value mappings of what is declared.
+  - `.wrap(func)` — a forwarder to `func`, async when `func` is, carrying this signature; `.apply(func)` sets the signature on `func` itself.
+- `add_route_dependency(route, *deps)` — append dependencies to an `APIRoute` that is already built, and rebuild what FastAPI derived from its dependencies. Call it before the route's router is included elsewhere: an included router keeps its own copy until its routes change.
+- `add_lifespan(app_or_router, lifespan)` — run a lifespan inside the one already set, merging the state both yield, for libraries that need a startup step on an app they did not create.
+
+`root` for the dependency helpers is a `Dependant`, a `Depends(...)` marker or a plain callable; `as_dependant` is the conversion they share. A plain callable is read the way FastAPI would, with `Injected` defaults treated as dependencies.
+
 ### FastAPI request integration
 
 Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Register `init_inject_scope` as a dependency:
@@ -404,9 +447,10 @@ Everything the package supports is importable from `fastapi_injected` itself, an
 | --- | --- |
 | Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
 | Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
-| Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `synthetic_request`, `push_overrides`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
-| Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency` |
+| Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `synthetic_request`, `push_overrides`, `override_app`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
+| Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `strip_annotation`, `as_depends` |
 | FastAPI integration | `add_injected_scope`, `init_inject_scope` |
+| Reflection | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `Signature`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
 | Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundScopeError`, `UnnamedParamError` |
 
 `fastapi_injected.types` holds the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro` and friends — and is public too. Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.

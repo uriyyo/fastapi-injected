@@ -1,6 +1,6 @@
 from ._bind import UnboundDepArgsError, bind_deps, remap_dep_args, signature_with_deps
 from ._dataclass import MakeDataclass
-from ._deps_tp import is_arg, is_dep, unwrap_dep_dependency, unwrap_dep_tp
+from ._deps_tp import as_depends, is_arg, is_dep, strip_annotation, unwrap_dep_dependency, unwrap_dep_tp
 from ._fastapi_lifecycle import MissingDependencyCacheError, add_injected_scope, init_inject_scope
 from ._given import Given
 from ._injected import MakeInjected
@@ -12,10 +12,30 @@ from .deps import (
     clear_dependant_cache,
 )
 from .inject import inject
-from .overrides import FactoryOverride, Overrides, OverridesProvider, ValueOverride, push_overrides
+from .overrides import FactoryOverride, Overrides, OverridesProvider, ValueOverride, override_app, push_overrides
+from .reflect import (
+    add_lifespan,
+    add_route_dependency,
+    as_dependant,
+    find_dependant,
+    find_route,
+    iter_api_routes,
+    iter_calls,
+    iter_dependant,
+    iter_operations,
+    iter_overridden,
+    iter_params,
+    iter_routers,
+    iter_routes,
+    iter_routes_where,
+    iter_security,
+    match_route,
+    operation_for,
+    response_type,
+)
 from .resolve import resolve
 from .scope import InjectScope, UnboundScopeError, inside_inject_scope, push_inject_scope, synthetic_request
-from .sign import NotADependencyError
+from .signature import NotADependencyError, ParamRole, Signature
 from .types import Arg, ArgMarker, Dep, DepFactory, DepOf, Injected
 
 __all__ = [
@@ -37,23 +57,46 @@ __all__ = [
     "NotADependencyError",
     "Overrides",
     "OverridesProvider",
+    "ParamRole",
+    "Signature",
     "UnboundDepArgsError",
     "UnboundScopeError",
     "UnnamedParamError",
     "ValueOverride",
     "add_injected_scope",
+    "add_lifespan",
+    "add_route_dependency",
+    "as_dependant",
+    "as_depends",
     "bind_deps",
     "clear_dependant_cache",
+    "find_dependant",
+    "find_route",
     "init_inject_scope",
     "inject",
     "inside_inject_scope",
     "is_arg",
     "is_dep",
+    "iter_api_routes",
+    "iter_calls",
+    "iter_dependant",
+    "iter_operations",
+    "iter_overridden",
+    "iter_params",
+    "iter_routers",
+    "iter_routes",
+    "iter_routes_where",
+    "iter_security",
+    "match_route",
+    "operation_for",
+    "override_app",
     "push_inject_scope",
     "push_overrides",
     "remap_dep_args",
     "resolve",
+    "response_type",
     "signature_with_deps",
+    "strip_annotation",
     "synthetic_request",
     "unwrap_dep_dependency",
     "unwrap_dep_tp",

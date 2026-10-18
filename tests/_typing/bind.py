@@ -1,8 +1,7 @@
-import inspect
 from collections.abc import Sequence
 from typing import Any
 
-from fastapi_injected import DepFactory, Given, bind_deps, resolve, signature_with_deps
+from fastapi_injected import DepFactory, Given, Signature, bind_deps, resolve, signature_with_deps
 from fastapi_injected._bind import UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
 from fastapi_injected.types import DepOf
 
@@ -66,7 +65,7 @@ def _markers_can_be_unpacked(deps: Sequence[DepOf[Any]]) -> None:
 
 
 async def _pieces() -> None:
-    static_assert(is_equivalent_to(TypeOf[signature_with_deps(_describe)], inspect.Signature))
+    static_assert(is_equivalent_to(TypeOf[signature_with_deps(_describe)], Signature))
     static_assert(is_equivalent_to(TypeOf[dep_arg_name(0)], str))
     static_assert(is_equivalent_to(TypeOf[take_dep_args({})], list[Any]))
 

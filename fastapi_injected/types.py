@@ -2,7 +2,7 @@ import inspect
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, runtime_checkable
 
-from fastapi import Depends, Request, WebSocket
+from fastapi import Depends, Request, WebSocket, params
 from fastapi.types import DependencyCacheKey
 from typing_extensions import TypeForm, sentinel
 
@@ -79,6 +79,16 @@ type DepShape[R] = Coro[R] | AsyncIterator[R] | Iterator[R]
 type DepReturn[R] = DepShape[R] | R
 type DepDecl[**P, R] = Callable[P, DepShape[R]]
 
+
+@runtime_checkable
+class HasDependsHook[**P, R](Protocol):
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        pass
+
+    def __get_depends__(self) -> params.Depends:
+        pass
+
+
 __all__ = [
     "Arg",
     "ArgMarker",
@@ -96,6 +106,7 @@ __all__ = [
     "DependencyCache",
     "Func",
     "HasDependencyOverrides",
+    "HasDependsHook",
     "HasSignature",
     "Injected",
 ]

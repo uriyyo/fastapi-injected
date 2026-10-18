@@ -1,9 +1,10 @@
+import inspect
 from functools import partial, wraps
 from typing import overload
 
 from .deps import create_dependant, resolve_dependencies
 from .scope import inside_inject_scope
-from .sign import strip_sign
+from .signature import Signature
 from .types import AsyncDecorator, AsyncFunc
 
 
@@ -34,7 +35,6 @@ def inject[**P, R](
 
     dependant = create_dependant(func)
 
-    @strip_sign(dependant)
     @wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         async with inside_inject_scope(
@@ -47,7 +47,8 @@ def inject[**P, R](
 
             return await func(*args, **kwargs)
 
-    return wrapper
+    # plain inspect.signature: the wrapper's globals cannot resolve the function's string annotations
+    return Signature.of(inspect.signature(wrapper)).strip(dependant).apply(wrapper)
 
 
 __all__ = [

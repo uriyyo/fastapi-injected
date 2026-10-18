@@ -3,12 +3,11 @@ from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import Annotated, Any, Concatenate, get_origin, overload
 
-from fastapi.dependencies.utils import get_typed_signature
 from fastapi.params import Depends
 
 from ._calls import annotated
 from ._deps_tp import unwrap_tp
-from .sign import update_func_sign
+from .signature import Signature
 from .types import AsyncFunc, DepOf, Func
 
 _DEP_ARG_PREFIX = "__dep_arg_"
@@ -52,26 +51,23 @@ def signature_with_deps(
     func: Func[..., Any],
     /,
     *deps: DepOf[Any] | Callable[..., Any],
-) -> inspect.Signature:
-    sign = get_typed_signature(func)
-    parameters = [*sign.parameters.values()]
+) -> Signature:
+    sign = Signature.of(func)
+    bound = [*sign.parameters][: len(deps)]
 
-    if len(deps) > len(parameters):
-        msg = f"{len(deps)} dependencies cannot be bound to {len(parameters)} parameters"
+    if len(deps) > len(bound):
+        msg = f"{len(deps)} dependencies cannot be bound to {len(bound)} parameters"
         raise TypeError(msg)
 
-    return sign.replace(
-        parameters=[
-            *[
-                inspect.Parameter(
-                    dep_arg_name(index),
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    annotation=_dep_annotation(dep),
-                )
-                for index, dep in enumerate(deps)
-            ],
-            *parameters[len(deps) :],
-        ],
+    return sign.drop(*bound).prepend(
+        *(
+            inspect.Parameter(
+                dep_arg_name(index),
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=_dep_annotation(dep),
+            )
+            for index, dep in enumerate(deps)
+        ),
     )
 
 
@@ -167,10 +163,7 @@ def bind_deps[**P, R](
     /,
     *deps: DepOf[Any] | Callable[..., Any],
 ) -> AsyncFunc[..., R]:
-    return update_func_sign(
-        remap_dep_args(func),
-        signature_with_deps(func, *deps),
-    )
+    return signature_with_deps(func, *deps).apply(remap_dep_args(func))
 
 
 __all__ = [

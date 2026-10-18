@@ -1,9 +1,13 @@
+import types
+import typing
+from collections.abc import Callable
 from typing import Annotated, Any, TypeVar, get_args, get_origin
 
+from fastapi import params
 from fastapi.params import Body, Depends, Param
 from typing_inspection.typing_objects import is_typealiastype
 
-from .types import ArgMarker
+from .types import ArgMarker, HasDependsHook
 
 
 def unwrap_tp(tp: Any) -> Any:
@@ -70,10 +74,41 @@ def unwrap_dep_dependency(obj: Any, /) -> Any:
     return tp
 
 
+def strip_annotation(tp: Any, /) -> Any:
+    # Annotated[X, ...] -> X, X | None -> X, repeated until nothing changes
+    while True:
+        match get_origin(tp):
+            case typing.Annotated:
+                tp = get_args(tp)[0]
+            case typing.Union | types.UnionType:
+                args = [arg for arg in get_args(tp) if arg is not type(None)]
+                if len(args) != 1:
+                    return tp
+                tp = args[0]
+            case _:
+                return tp
+
+
+type DependsSource = params.Depends | HasDependsHook[..., Any] | Callable[..., Any]
+
+
+def as_depends(dep: DependsSource, /) -> params.Depends:
+    match dep:
+        case params.Depends():
+            return dep
+        case HasDependsHook():
+            return dep.__get_depends__()
+        case _:
+            return params.Depends(dep)
+
+
 __all__ = [
+    "DependsSource",
+    "as_depends",
     "is_arg",
     "is_dep",
     "is_request_param",
+    "strip_annotation",
     "unwrap_dep_dependency",
     "unwrap_dep_tp",
     "unwrap_tp",
