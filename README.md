@@ -374,13 +374,14 @@ assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
 
 ### FastAPI request integration
 
-Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Register `init_inject_scope` as a dependency:
+Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injected_scope`: it adds `InjectScopeMiddleware`, which opens the scope for the whole request, and the `init_inject_scope` dependency, which binds it to the connection of the route. Add it after your other middleware, so the scope is open for them too:
 
 ```python
-from fastapi import Depends, FastAPI
-from fastapi_injected import Dep, init_inject_scope, resolve
+from fastapi import FastAPI
+from fastapi_injected import Dep, add_injected_scope, resolve
 
-app = FastAPI(dependencies=[Depends(init_inject_scope)])
+app = FastAPI()
+add_injected_scope(app)
 
 
 @app.get("/")
@@ -389,7 +390,7 @@ async def route(service: Dep[Service]) -> str:
     ...
 ```
 
-Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request.
+Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request. The scope is opened by a middleware, so `resolve` also works inside middleware added before it (before routing, `request.scope["route"]` and path params are not available yet).
 
 WebSocket routes work the same way: the scope is bound to the `WebSocket` instead of a `Request`, and dependencies that ask for one get it. A websocket handed to a dependency shares its handshake with the one the route received, so it can be talked through after the route has called `accept()`:
 
@@ -449,7 +450,7 @@ Everything the package supports is importable from `fastapi_injected` itself, an
 | Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
 | Scopes and overrides | `InjectScope`, `push_inject_scope`, `inside_inject_scope`, `synthetic_request`, `push_overrides`, `override_app`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
 | Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `strip_annotation`, `as_depends` |
-| FastAPI integration | `add_injected_scope`, `init_inject_scope` |
+| FastAPI integration | `add_injected_scope`, `InjectScopeMiddleware`, `init_inject_scope` |
 | Reflection | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `Signature`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
 | Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundScopeError`, `UnnamedParamError` |
 

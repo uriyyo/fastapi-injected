@@ -1,22 +1,36 @@
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import pytest
-from fastapi import Depends, FastAPI, Header, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, Header, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.testclient import TestClient
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketState
 
-from fastapi_injected import Dep, Injected, init_inject_scope, inject, push_inject_scope, resolve
-from fastapi_injected._fastapi_lifecycle import add_injected_scope
+from fastapi_injected import Dep, Injected, add_injected_scope, init_inject_scope, inject, push_inject_scope, resolve
+from fastapi_injected._fastapi_lifecycle import InjectScopeMiddleware
 from fastapi_injected.scope import InjectScope
 
 from .deps import Child, Container, ContextState, ctx_dep
 
-app = FastAPI(
-    dependencies=[
-        Depends(init_inject_scope),
-    ],
-)
+app = FastAPI()
+
+
+@app.middleware("http")
+async def _resolve_in_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    if request.url.path == "/middleware":
+        request.state.container = await resolve(Container)
+
+    return await call_next(request)
+
+
+# added last so it is the outermost middleware, and the ones above resolve inside its scope
+add_injected_scope(app)
+
+
+add_injected_scope(app)
+
 
 client = TestClient(app)
 
@@ -119,24 +133,27 @@ def test_nested_scope_shares_request_state() -> None:
     assert result.json() is True
 
 
-def test_add_injected_scope() -> None:
-    other_app = FastAPI()
-    assert not other_app.router.dependencies
-
-    add_injected_scope(other_app)
-    assert [dep.dependency for dep in other_app.router.dependencies] == [init_inject_scope]
-
-
 def test_add_injected_scope_is_idempotent() -> None:
     other_app = FastAPI(dependencies=[Depends(_item_id_dep)])
+    other_app.add_middleware(GZipMiddleware)
 
     add_injected_scope(other_app)
     add_injected_scope(other_app)
 
-    assert [dep.dependency for dep in other_app.router.dependencies] == [
-        init_inject_scope,
-        _item_id_dep,
-    ]
+    assert [middleware.cls for middleware in other_app.user_middleware] == [InjectScopeMiddleware, GZipMiddleware]
+    assert [dep.dependency for dep in other_app.router.dependencies] == [init_inject_scope, _item_id_dep]
+
+
+@app.get("/middleware")
+async def middleware_route(request: Request, container: Dep[Container]) -> bool:
+    return request.state.container is container
+
+
+def test_resolve_in_middleware_shares_the_request_cache() -> None:
+    result = client.get("/middleware")
+
+    assert result.status_code == status.HTTP_200_OK
+    assert result.json() is True
 
 
 overridden_app = FastAPI()

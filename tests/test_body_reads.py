@@ -10,7 +10,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from fastapi_injected import (
     DependencyResolutionError,
     Injected,
-    init_inject_scope,
+    add_injected_scope,
     inject,
     push_inject_scope,
     resolve,
@@ -83,7 +83,10 @@ class _CountingReceive:
         self.reads.append(reads)
 
 
-app = FastAPI(dependencies=[Depends(init_inject_scope)])
+app = FastAPI()
+
+
+add_injected_scope(app)
 counting = _CountingReceive(app)
 client = TestClient(counting)
 

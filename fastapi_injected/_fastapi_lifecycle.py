@@ -1,14 +1,16 @@
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Request, WebSocket, routing
 from fastapi.dependencies import utils
 from starlette.requests import HTTPConnection
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ._cache import ScopeCache
 from .scope import push_inject_scope
-from .types import DependencyCache, HasDependencyOverrides
+from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 _DEPENDENCY_CACHE_KEY = "__fastapi_injected_dependency_cache__"
 
@@ -71,6 +73,7 @@ async def init_inject_scope(connection: HTTPConnection) -> AsyncGenerator[None]:
     if not isinstance(connection, Request | WebSocket):  # pragma: no cover
         raise TypeError(f"expected a Request or a WebSocket, got {type(connection).__name__}")
 
+    # the connection of the route: the middleware scope, if any, was bound before routing
     async with push_inject_scope(
         dependency_cache=_get_dependency_cache(connection),
         request=connection,
@@ -79,18 +82,45 @@ async def init_inject_scope(connection: HTTPConnection) -> AsyncGenerator[None]:
         yield
 
 
+@dataclass
+class InjectScopeMiddleware:
+    app: ASGIApp
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        connection: BoundConnection
+
+        match scope["type"]:
+            case "http":
+                connection = Request(scope, receive, send)
+            case "websocket":
+                connection = WebSocket(scope, receive, send)
+            case _:
+                await self.app(scope, receive, send)
+                return
+
+        scope[_DEPENDENCY_CACHE_KEY] = cache = {}
+
+        async with push_inject_scope(
+            dependency_cache=cache,
+            request=connection,
+            provider=scope.get("app"),
+        ):
+            await self.app(scope, receive, send)
+
+
 def add_injected_scope(
     app: FastAPI,
     /,
 ) -> None:
-    if any(dep.dependency is init_inject_scope for dep in app.router.dependencies):
-        return
+    if not any(middleware.cls is InjectScopeMiddleware for middleware in app.user_middleware):
+        app.add_middleware(InjectScopeMiddleware)
 
-    dependency = Depends(init_inject_scope)
-    app.router.dependencies.insert(0, dependency)
+    if not any(dep.dependency is init_inject_scope for dep in app.router.dependencies):
+        app.router.dependencies.insert(0, Depends(init_inject_scope))
 
 
 __all__ = [
+    "InjectScopeMiddleware",
     "MissingDependencyCacheError",
     "add_injected_scope",
     "init_inject_scope",

@@ -24,7 +24,7 @@ from starlette.types import Message
 from fastapi_injected import (
     DependencyResolutionError,
     Injected,
-    init_inject_scope,
+    add_injected_scope,
     inject,
     push_inject_scope,
     resolve,
@@ -81,7 +81,9 @@ type Session = Annotated[str, Depends(_session)]
 type Page = Annotated[int, Depends(_page)]
 type ItemID = Annotated[int, Depends(_item_id)]
 
-app = FastAPI(dependencies=[Depends(init_inject_scope)])
+app = FastAPI()
+
+add_injected_scope(app)
 client = TestClient(app)
 
 

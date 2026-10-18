@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 
 import pytest
-from fastapi import Body, Cookie, Depends, FastAPI, Form, Header, Path, Query, status
+from fastapi import Body, Cookie, FastAPI, Form, Header, Path, Query, status
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -10,8 +10,8 @@ from fastapi_injected import (
     Injected,
     NotADependencyError,
     UnnamedParamError,
+    add_injected_scope,
     bind_deps,
-    init_inject_scope,
     inject,
     push_inject_scope,
     resolve,
@@ -27,7 +27,10 @@ class Login(BaseModel):
     user: str
 
 
-app = FastAPI(dependencies=[Depends(init_inject_scope)])
+app = FastAPI()
+
+
+add_injected_scope(app)
 client = TestClient(app)
 
 

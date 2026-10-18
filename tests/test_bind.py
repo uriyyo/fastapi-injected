@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 from fastapi_injected import (
     Given,
+    add_injected_scope,
     bind_deps,
-    init_inject_scope,
     inject,
     push_inject_scope,
     push_overrides,
@@ -111,7 +111,8 @@ async def test_a_request_marker_is_bound_as_written() -> None:
 
 
 async def test_a_request_marker_resolves_from_the_request() -> None:
-    app = FastAPI(dependencies=[Depends(init_inject_scope)])
+    app = FastAPI()
+    add_injected_scope(app)
 
     @app.get("/marker")
     async def _route(described: Annotated[str, Depends(bind_deps(titled, TitleHeader, RoleDep))]) -> str:

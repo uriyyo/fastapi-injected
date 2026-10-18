@@ -1,7 +1,12 @@
 from ._bind import UnboundDepArgsError, bind_deps, remap_dep_args, signature_with_deps
 from ._dataclass import MakeDataclass
 from ._deps_tp import as_depends, is_arg, is_dep, strip_annotation, unwrap_dep_dependency, unwrap_dep_tp
-from ._fastapi_lifecycle import MissingDependencyCacheError, add_injected_scope, init_inject_scope
+from ._fastapi_lifecycle import (
+    InjectScopeMiddleware,
+    MissingDependencyCacheError,
+    add_injected_scope,
+    init_inject_scope,
+)
 from ._given import Given
 from ._injected import MakeInjected
 from .deps import (
@@ -49,6 +54,7 @@ __all__ = [
     "Given",
     "HasDependsHook",
     "InjectScope",
+    "InjectScopeMiddleware",
     "Injected",
     "MakeDataclass",
     "MakeInjected",

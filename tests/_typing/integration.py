@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, FastAPI, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket
 
 from fastapi_injected import Dep, add_injected_scope, init_inject_scope
 
@@ -12,7 +12,9 @@ from .deps import (
     static_assert,
 )
 
-app = FastAPI(dependencies=[Depends(init_inject_scope)])
+app = FastAPI()
+
+add_injected_scope(app)
 
 static_assert(is_equivalent_to(TypeOf[add_injected_scope(app)], None))
 
