@@ -13,15 +13,14 @@ from fastapi_injected import (
     FactoryOverride,
     Given,
     Injected,
-    MakeInjected,
     bind_deps,
-    clear_dependant_cache,
     inject,
     injection_ctx,
     push_overrides,
     resolve,
 )
 from fastapi_injected.deps import _create_annotation_dependant
+from fastapi_injected.ext import MakeInjected, clear_dependant_cache
 from fastapi_injected.types import DepOf
 
 pytestmark = pytest.mark.asyncio

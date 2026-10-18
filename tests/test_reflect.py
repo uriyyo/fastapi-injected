@@ -13,15 +13,8 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from starlette.routing import Host, Mount, Route, Router
 
-from fastapi_injected import (
-    Arg,
-    Dep,
-    Injected,
-    ParamRole,
-    Signature,
-    as_depends,
-    override_app,
-)
+from fastapi_injected import Arg, Dep, Injected, override_app
+from fastapi_injected.ext import as_depends
 from fastapi_injected.reflect import (
     ParamKind,
     add_lifespan,
@@ -43,6 +36,7 @@ from fastapi_injected.reflect import (
     operation_for,
     response_type,
 )
+from fastapi_injected.signature import ParamRole, Signature
 
 
 async def endpoint() -> None:

@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from fastapi_injected import Given, injection_ctx, is_dep, push_overrides, resolve
+from fastapi_injected import Given, injection_ctx, push_overrides, resolve
+from fastapi_injected.ext import is_dep
 
 pytestmark = pytest.mark.asyncio
 

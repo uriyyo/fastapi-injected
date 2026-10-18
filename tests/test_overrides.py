@@ -118,3 +118,11 @@ async def test_push_overrides_caches_inside_the_block():
             second = await resolve(Container)
 
             assert first is second
+
+
+async def test_callable_override_is_called() -> None:
+    def fake() -> str:
+        return "fake"
+
+    with push_overrides({Child: fake}):
+        assert await resolve(Child) == "fake"

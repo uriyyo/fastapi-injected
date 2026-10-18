@@ -1,8 +1,10 @@
 from collections.abc import Sequence
 from typing import Any
 
-from fastapi_injected import DepFactory, Given, Signature, bind_deps, resolve, signature_with_deps
+from fastapi_injected import DepFactory, Given, bind_deps, resolve
 from fastapi_injected._bind import UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
+from fastapi_injected.ext import signature_with_deps
+from fastapi_injected.signature import Signature
 from fastapi_injected.types import DepOf
 
 from .deps import (

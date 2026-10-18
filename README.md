@@ -181,9 +181,9 @@ with push_overrides({DepFactory[Session, session_dep]: my_session}):
     ...
 ```
 
-Values are used as-is, but two wrappers make the intent explicit and cover the ambiguous cases:
+A callable value is called to produce the dependency, as in FastAPI's `dependency_overrides`; anything else is injected as it is. Two wrappers make the intent explicit and cover the ambiguous cases:
 
-- `ValueOverride(value)` — always inject `value`, even when it is itself callable.
+- `ValueOverride(value)` — always inject `value`, even when it is itself callable (a class, a mock, a function object).
 - `FactoryOverride(factory)` — call `factory` to produce the value. Sync, async, and generator factories are all supported, with the same teardown semantics as regular dependencies.
 
 ```python
@@ -232,7 +232,8 @@ Resolved values are cached in their context by the callable that resolves them, 
 
 ```python
 from dataclasses import field
-from fastapi_injected import MakeDataclass, resolve
+from fastapi_injected import resolve
+from fastapi_injected.ext import MakeDataclass
 
 
 class Settings(MakeDataclass):
@@ -305,7 +306,8 @@ Binding takes the parameters away, and a type checker sees what is left: `bind_d
 When the markers belong together, `MakeInjected` makes a dataclass of them: fields annotated with `DepOf` hold the markers, and the call receives what they resolve to.
 
 ```python
-from fastapi_injected import Given, MakeInjected
+from fastapi_injected import Given
+from fastapi_injected.ext import MakeInjected
 from fastapi_injected.types import DepOf
 
 
@@ -325,7 +327,7 @@ It is a `MakeDataclass`, so instances built from equal markers are equal — and
 
 ### Inspecting annotations
 
-A few helpers are exported for code that needs to reason about `Dep[...]` annotations — building override maps, custom decorators, and the like:
+`fastapi_injected.ext` holds a few helpers for code that needs to reason about `Dep[...]` annotations — building override maps, custom decorators, and the like:
 
 - `is_dep(tp)` — whether `tp` is a `Dep`/`DepFactory` annotation.
 - `unwrap_dep_tp(tp)` — the annotated type (`Any` for a bare `Dep`).
@@ -442,19 +444,28 @@ The body is read only when the resolved dependency declares one, and it is read 
 
 ## What is public
 
-Everything the package supports is importable from `fastapi_injected` itself, and that is the surface a release keeps:
+The root package is what you need to use the library, and the surface a release keeps:
 
 | | |
 | --- | --- |
-| Markers | `Dep`, `DepFactory`, `DepOf`, `Arg`, `Given`, `Injected` |
-| Resolving | `inject`, `resolve`, `bind_deps`, `signature_with_deps`, `remap_dep_args`, `clear_dependant_cache` |
-| Contexts and overrides | `InjectionContext`, `injection_ctx`, `ensure_injection_ctx`, `synthetic_request`, `push_overrides`, `override_app`, `Overrides`, `OverridesProvider`, `ValueOverride`, `FactoryOverride` |
-| Building on top | `MakeDataclass`, `MakeInjected`, `HasDependsHook`, `ArgMarker`, `is_arg`, `is_dep`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `strip_annotation`, `as_depends` |
-| FastAPI integration | `add_injection`, `InjectionMiddleware`, `bind_injection_ctx` |
-| Reflection | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `Signature`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
-| Errors | `DependencyResolutionError`, `MissedDependencyError`, `MissingDependencyCacheError`, `NotADependencyError`, `UnboundDepArgsError`, `UnboundContextError`, `UnnamedParamError` |
+| Markers | `Dep`, `DepFactory`, `Arg`, `Given`, `Injected` |
+| Resolving | `inject`, `resolve`, `bind_deps` |
+| Contexts and overrides | `InjectionContext`, `injection_ctx`, `synthetic_request`, `push_overrides`, `override_app`, `ValueOverride`, `FactoryOverride` |
+| FastAPI integration | `add_injection` |
+| Errors | `DependencyResolutionError`, `NotADependencyError`, `UnboundContextError`, `UnnamedParamError` |
 
-`fastapi_injected.types` holds the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro` and friends — and is public too. Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
+Code that builds on the library imports from the submodule that owns the piece. These are public too:
+
+| Module | Names |
+| --- | --- |
+| `fastapi_injected.ext` | `MakeDataclass`, `MakeInjected`, `signature_with_deps`, `remap_dep_args`, `is_dep`, `is_arg`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `strip_annotation`, `as_depends`, `clear_dependant_cache`, `ensure_injection_ctx`, `MissedDependencyError`, `UnboundDepArgsError` |
+| `fastapi_injected.types` | `DepOf`, `ArgMarker`, `HasDependsHook`, and the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro`, `BoundConnection`, `DependencyCache` and friends |
+| `fastapi_injected.overrides` | `Overrides`, `OverridesProvider` |
+| `fastapi_injected.signature` | `Signature`, `ParamRole` |
+| `fastapi_injected.fastapi` | `InjectionMiddleware`, `bind_injection_ctx`, `MissingDependencyCacheError` |
+| `fastapi_injected.reflect` | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
+
+Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
 
 ## License
 

@@ -1,6 +1,6 @@
 from dataclasses import field
 
-from fastapi_injected import MakeDataclass
+from fastapi_injected.ext import MakeDataclass
 
 from .deps import (
     ContextState,

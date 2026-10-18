@@ -2,7 +2,8 @@ from dataclasses import field, fields
 
 import pytest
 
-from fastapi_injected import MakeDataclass, resolve
+from fastapi_injected import resolve
+from fastapi_injected.ext import MakeDataclass
 
 
 class Point(MakeDataclass):

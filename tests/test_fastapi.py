@@ -8,9 +8,9 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketState
 
-from fastapi_injected import Dep, Injected, add_injection, bind_injection_ctx, inject, injection_ctx, resolve
-from fastapi_injected._fastapi_lifecycle import InjectionMiddleware
+from fastapi_injected import Dep, Injected, add_injection, inject, injection_ctx, resolve
 from fastapi_injected.ctx import InjectionContext
+from fastapi_injected.fastapi import InjectionMiddleware, bind_injection_ctx
 
 from .deps import Child, Container, ContextState, ctx_dep
 

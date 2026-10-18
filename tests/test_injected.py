@@ -5,7 +5,8 @@ from typing import Annotated
 import pytest
 from fastapi import Depends
 
-from fastapi_injected import Given, MakeInjected, injection_ctx, push_overrides, resolve
+from fastapi_injected import Given, injection_ctx, push_overrides, resolve
+from fastapi_injected.ext import MakeInjected
 from fastapi_injected.types import DepOf
 
 pytestmark = pytest.mark.asyncio

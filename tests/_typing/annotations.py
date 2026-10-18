@@ -1,6 +1,7 @@
 from typing import Any
 
-from fastapi_injected import Dep, DepFactory, is_dep, unwrap_dep_dependency, unwrap_dep_tp
+from fastapi_injected import Dep, DepFactory
+from fastapi_injected.ext import is_dep, unwrap_dep_dependency, unwrap_dep_tp
 
 from .deps import (
     Container,

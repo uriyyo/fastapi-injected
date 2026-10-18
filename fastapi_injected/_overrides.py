@@ -47,6 +47,9 @@ def _create_resolver[T](val: T, /) -> Any:
             return val
         case FactoryOverride(factory):
             return factory
+        case _ if callable(val):
+            # the FastAPI convention: an override is what gets called in place of the dependency
+            return val
         case _:
             return ValueOverride(val)
 

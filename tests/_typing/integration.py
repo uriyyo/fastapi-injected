@@ -2,7 +2,8 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI, Request, WebSocket
 
-from fastapi_injected import Dep, add_injection, bind_injection_ctx
+from fastapi_injected import Dep, add_injection
+from fastapi_injected.fastapi import bind_injection_ctx
 
 from .deps import (
     Child,

@@ -1,7 +1,8 @@
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi_injected import Dep, Given, MakeInjected, resolve
+from fastapi_injected import Dep, Given, resolve
+from fastapi_injected.ext import MakeInjected
 from fastapi_injected.types import DepOf
 
 from .deps import (

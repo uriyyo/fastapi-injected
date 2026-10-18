@@ -5,17 +5,9 @@ import pytest
 from fastapi import Depends, FastAPI, Header
 from fastapi.testclient import TestClient
 
-from fastapi_injected import (
-    Given,
-    add_injection,
-    bind_deps,
-    inject,
-    injection_ctx,
-    push_overrides,
-    resolve,
-    signature_with_deps,
-)
+from fastapi_injected import Given, add_injection, bind_deps, inject, injection_ctx, push_overrides, resolve
 from fastapi_injected._bind import UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
+from fastapi_injected.ext import signature_with_deps
 
 pytestmark = pytest.mark.asyncio
 
