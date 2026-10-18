@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 import pytest
 from fastapi import (
@@ -30,6 +30,7 @@ from fastapi_injected import (
     resolve,
     synthetic_request,
 )
+from fastapi_injected.fastapi import ConnectionNotAvailableError
 
 
 class Item(BaseModel):
@@ -522,3 +523,23 @@ async def test_header_with_an_alias_on_a_synthetic_request():
     [error] = exc_info.value.errors
 
     assert (error["type"], error["loc"]) == ("missing", ("header", "X-Api-Key"))
+
+
+def test_body_can_not_be_read_in_a_middleware() -> None:
+    middleware_app = FastAPI()
+
+    @middleware_app.middleware("http")
+    async def _read_body(request: Request, call_next: Any) -> Any:
+        with pytest.raises(ConnectionNotAvailableError):
+            await resolve(ItemDep)
+
+        return await call_next(request)
+
+    @middleware_app.post("/")
+    async def _route(item: Item) -> str:
+        # the route still gets the body the middleware could not take
+        return item.name
+
+    add_injection(middleware_app)
+
+    assert TestClient(middleware_app).post("/", json={"name": "g"}).json() == "g"

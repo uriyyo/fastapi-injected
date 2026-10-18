@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends, FastAPI, Request, WebSocket, routing
 from fastapi.dependencies import utils
 from starlette.requests import HTTPConnection
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ._cache import ContextCache
 from .ctx import injection_ctx
@@ -17,6 +17,19 @@ _DEPENDENCY_CACHE_KEY = "__fastapi_injected_dependency_cache__"
 
 class MissingDependencyCacheError(Exception):
     pass
+
+
+class ConnectionNotAvailableError(Exception):
+    def __init__(self) -> None:
+        super().__init__("The connection can not be received from or sent to outside of a route")
+
+
+async def _unavailable_receive() -> Message:
+    raise ConnectionNotAvailableError
+
+
+async def _unavailable_send(_: Message) -> None:
+    raise ConnectionNotAvailableError
 
 
 if not TYPE_CHECKING:
@@ -91,9 +104,9 @@ class InjectionMiddleware:
 
         match scope["type"]:
             case "http":
-                connection = Request(scope, receive, send)
+                connection = Request(scope, _unavailable_receive, _unavailable_send)
             case "websocket":
-                connection = WebSocket(scope, receive, send)
+                connection = WebSocket(scope, _unavailable_receive, _unavailable_send)
             case _:
                 await self.app(scope, receive, send)
                 return
@@ -103,23 +116,39 @@ class InjectionMiddleware:
         async with injection_ctx(
             dependency_cache=cache,
             request=connection,
-            provider=scope.get("app"),
+            provider=_get_overrides_provider(connection),
         ):
             await self.app(scope, receive, send)
+
+
+def _wrap_build_middleware_stack(app: FastAPI) -> None:
+    _build_middleware_stack = app.build_middleware_stack
+
+    @wraps(_build_middleware_stack)
+    def _build_middleware_stack_wrapper() -> ASGIApp:
+        return InjectionMiddleware(_build_middleware_stack())
+
+    app.build_middleware_stack = _build_middleware_stack_wrapper  # type: ignore[ty:invalid-assignment]
+    app.build_middleware_stack.__patched__ = True  # type: ignore[ty:unresolved-attribute]
+
+
+def _is_build_middleware_stack_patched(app: FastAPI) -> bool:
+    return getattr(app.build_middleware_stack, "__patched__", False)
 
 
 def add_injection(
     app: FastAPI,
     /,
 ) -> None:
-    if not any(middleware.cls is InjectionMiddleware for middleware in app.user_middleware):
-        app.add_middleware(InjectionMiddleware)
+    if not _is_build_middleware_stack_patched(app):
+        _wrap_build_middleware_stack(app)
 
     if not any(dep.dependency is bind_injection_ctx for dep in app.router.dependencies):
         app.router.dependencies.insert(0, Depends(bind_injection_ctx))
 
 
 __all__ = [
+    "ConnectionNotAvailableError",
     "InjectionMiddleware",
     "MissingDependencyCacheError",
     "add_injection",

@@ -136,7 +136,10 @@ def test_add_injection_is_idempotent() -> None:
     add_injection(other_app)
     add_injection(other_app)
 
-    assert [middleware.cls for middleware in other_app.user_middleware] == [InjectionMiddleware, GZipMiddleware]
+    stack = other_app.build_middleware_stack()
+    assert isinstance(stack, InjectionMiddleware)
+    assert not isinstance(stack.app, InjectionMiddleware)
+    assert [middleware.cls for middleware in other_app.user_middleware] == [GZipMiddleware]
     assert [dep.dependency for dep in other_app.router.dependencies] == [bind_injection_ctx, _item_id_dep]
 
 
