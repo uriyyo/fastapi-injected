@@ -2,7 +2,8 @@ import dataclasses
 import inspect
 import typing
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, get_args, get_origin
+from contextlib import ExitStack
+from typing import Any, Self, get_args, get_origin
 
 from fastapi.dependencies.utils import get_typed_signature
 from fastapi.params import Depends
@@ -61,9 +62,10 @@ class CallProxy:
     # caches keep every call they are shown, and once released this is all they keep
     __slots__ = ("_hash", "_proxies", "_signature", "call")
 
-    def __init__(self, call: Callable[..., Any], proxies: list["CallProxy"], /) -> None:
+    def __init__(self, call: Callable[..., Any], proxies: list["CallProxy"] | None = None, /) -> None:
         self.call: Callable[..., Any] | None = call
-        self._proxies = proxies
+        # a root proxy owns the list, the ones made for its dependencies share it
+        self._proxies = [] if proxies is None else proxies
         self._signature: inspect.Signature | None = None
 
         try:
@@ -71,7 +73,7 @@ class CallProxy:
         except TypeError:
             self._hash = id(call)
 
-        proxies.append(self)
+        self._proxies.append(self)
 
     @property
     def __wrapped__(self) -> Callable[..., Any]:
@@ -107,6 +109,13 @@ class CallProxy:
 
         return self.call == unwrap_proxy(other)
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        for proxy in self._proxies:
+            proxy.release()
+
     def release(self) -> None:
         self.call = None
         self._signature = None
@@ -116,11 +125,16 @@ class CallProxy:
         if depends.dependency is None or is_static_call(depends.dependency):
             return depends
 
-        return dataclasses.replace(depends, dependency=CallProxy(depends.dependency, self._proxies))
+        return dataclasses.replace(
+            depends,
+            dependency=CallProxy(depends.dependency, self._proxies),
+        )
 
     def _detach_param(self, param: inspect.Parameter, /) -> inspect.Parameter:
         if isinstance(param.default, Depends):
-            param = param.replace(default=self._detach_depends(param.default))
+            param = param.replace(
+                default=self._detach_depends(param.default),
+            )
 
         match _depends_metadata(param.annotation):
             case (tp, metadata):
@@ -135,12 +149,19 @@ class CallProxy:
 class DetachedOverrides(Mapping[Any, Any]):
     # an override replaces a call inside FastAPI, past where a proxy could be put on it,
     # so the overrides of a resolve hand out what they hold behind one
-    __slots__ = ("_handed", "_overrides", "_proxies")
+    __slots__ = ("_handed", "_overrides", "_stack")
 
-    def __init__(self, overrides: Mapping[Any, Any], proxies: list[CallProxy], /) -> None:
+    def __init__(self, overrides: Mapping[Any, Any], /) -> None:
         self._overrides = overrides
-        self._proxies = proxies
+        self._stack = ExitStack()
         self._handed: dict[int, CallProxy] = {}
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stack.close()
+        self._handed = {}
 
     @property
     def dependency_overrides(self) -> Mapping[Any, Any]:
@@ -154,7 +175,7 @@ class DetachedOverrides(Mapping[Any, Any]):
             return override
 
         if (proxy := self._handed.get(id(override))) is None:
-            proxy = self._handed[id(override)] = CallProxy(override, self._proxies)
+            proxy = self._handed[id(override)] = self._stack.enter_context(CallProxy(override))
 
         return proxy
 
@@ -169,16 +190,12 @@ class DetachedOverrides(Mapping[Any, Any]):
         return bool(self._overrides)
 
 
-def release(proxies: list[CallProxy], /) -> None:
-    for proxy in proxies:
-        proxy.release()
-
-
 def unwrap_proxy(call: Any, /) -> Any:
-    if isinstance(call, CallProxy) and call.call is not None:
-        return call.call
-
-    return call
+    match call:
+        case CallProxy(call=_call) if _call is not None:
+            return _call
+        case _:
+            return call
 
 
 __all__ = [
@@ -187,6 +204,5 @@ __all__ = [
     "annotated",
     "is_static_annotation",
     "is_static_call",
-    "release",
     "unwrap_proxy",
 ]

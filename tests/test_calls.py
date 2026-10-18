@@ -105,13 +105,24 @@ async def test_a_proxy_shows_fastapi_the_signature_it_stands_for():
 
 async def test_detached_overrides_hand_out_what_was_made_at_runtime_behind_a_proxy():
     value = One()
-    proxies: list[CallProxy] = []
-    overrides = DetachedOverrides({module_level: value, One: module_level}, proxies)
 
-    assert overrides.dependency_overrides is overrides
-    assert (list(overrides), len(overrides), bool(overrides)) == ([module_level, One], 2, True)
-    assert overrides[One] is module_level  # written in source, nothing to detach
-    assert overrides[module_level] is overrides[module_level]
-    assert overrides[module_level] == value
-    assert proxies == [value]
-    assert not DetachedOverrides({}, [])
+    with DetachedOverrides({module_level: value, One: module_level}) as overrides:
+        assert overrides.dependency_overrides is overrides
+        assert (list(overrides), len(overrides), bool(overrides)) == ([module_level, One], 2, True)
+        assert overrides[One] is module_level  # written in source, nothing to detach
+        assert overrides[module_level] is overrides[module_level]
+        assert overrides[module_level] == value
+        proxy = overrides[module_level]
+
+    # leaving the context releases what was handed out
+    assert proxy.call is None
+    assert not DetachedOverrides({})
+
+
+async def test_leaving_a_root_proxy_releases_the_ones_made_for_its_dependencies():
+    with CallProxy(Defaulted(41)) as root:
+        nested = inspect.signature(root).parameters["one"].default.dependency
+        assert isinstance(nested, CallProxy)
+
+    assert root.call is None
+    assert nested.call is None

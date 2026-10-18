@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
 from ._body import InvalidBodyError, request_body
-from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation, release
+from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation
 from ._deps_tp import is_dep, is_request_param, unwrap_tp
 from .ctx import InjectionContext
 from .signature import Signature
@@ -76,16 +76,8 @@ def open_dependant[**P, R](
     # a dependency made at runtime is analysed again on every resolve, and FastAPI only
     # ever sees its calls behind proxies released here - caching either would keep
     # whatever it carries alive past the request
-    proxies: list[CallProxy] = []
-    dependant = get_dependant(
-        path=path or "",
-        call=CallProxy(_value_factory(annotation), proxies),
-    )
-
-    try:
-        yield dependant
-    finally:
-        release(proxies)
+    with CallProxy(_value_factory(annotation)) as call:
+        yield get_dependant(path=path or "", call=call)
 
 
 def _named_param(annotation: Any, /) -> Any:
@@ -144,26 +136,23 @@ async def solve_arguments(
     dependant: Dependant,
     ctx: InjectionContext,
 ) -> dict[str, Any]:
-    proxies: list[CallProxy] = []
-
     try:
         async with ctx.lock:
             body, embed_body_fields = await request_body(ctx.bound_request, dependant)
 
-            solved = await solve_dependencies(
-                request=ctx.bound_request,
-                dependant=dependant,
-                dependency_cache=cast("DependencyCache", ctx.cache_for(dependant)),
-                dependency_overrides_provider=DetachedOverrides(ctx.dependency_overrides, proxies),
-                # this parameter is deprecated and not used
-                async_exit_stack=cast(AsyncExitStack, None),
-                body=body,
-                embed_body_fields=embed_body_fields,
-            )
+            with DetachedOverrides(ctx.dependency_overrides) as overrides:
+                solved = await solve_dependencies(
+                    request=ctx.bound_request,
+                    dependant=dependant,
+                    dependency_cache=cast(DependencyCache, ctx.cache_for(dependant)),
+                    dependency_overrides_provider=overrides,
+                    # this parameter is deprecated and not used
+                    async_exit_stack=cast(AsyncExitStack, None),
+                    body=body,
+                    embed_body_fields=embed_body_fields,
+                )
     except InvalidBodyError as exc:
         raise DependencyResolutionError(exc.errors) from None
-    finally:
-        release(proxies)
 
     if solved.errors:
         raise DependencyResolutionError(solved.errors)
