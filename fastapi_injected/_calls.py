@@ -14,7 +14,7 @@ from ._deps_tp import unwrap_tp
 def annotated(tp: Any, /, *metadata: Any) -> Any:
     # `Annotated[...]` goes through typing's own cache, which holds on to the last
     # aliases it built - and with them whatever value a runtime marker carries
-    return typing._AnnotatedAlias(tp, metadata)  # type: ignore[ty:unresolved-attribute] # noqa: SLF001
+    return typing._AnnotatedAlias(tp, metadata)  # type: ignore[ty:missing-attribute] # noqa: SLF001
 
 
 def is_static_call(call: Any, /) -> bool:

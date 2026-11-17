@@ -31,7 +31,7 @@ def inject[**P, R](
     new_ctx: bool = False,
 ) -> AsyncFunc[P, R] | AsyncDecorator[P, R]:
     if func is None:
-        return partial(inject, new_ctx=new_ctx)  # type: ignore[ty:invalid-return-type]
+        return partial(inject, new_ctx=new_ctx)  # type: ignore[ty:invalid-explicit-return]
 
     dependant = create_dependant(func)
 

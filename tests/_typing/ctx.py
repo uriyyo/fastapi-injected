@@ -61,7 +61,7 @@ async def _negatives() -> None:
     async with injection_ctx(dependency_cache=[]):  # type: ignore[ty:invalid-argument-type]
         pass
 
-    _ = InjectionContext.current().dependency_cache  # type: ignore[ty:unresolved-attribute]
+    _ = InjectionContext.current().dependency_cache  # type: ignore[ty:missing-union-attribute]
 
     async with injection_ctx(request=object()):  # type: ignore[ty:invalid-argument-type]
         pass

@@ -192,7 +192,7 @@ async def test_values_resolved_at_runtime_are_not_cached(make: Callable[[Payload
 
 
 class Opened(Resolver):
-    async def __call__(self, foo: Annotated[Foo, Depends(foo_dep)]) -> AsyncIterator[list[Payload]]:  # ty: ignore[invalid-method-override]
+    async def __call__(self, foo: Annotated[Foo, Depends(foo_dep)]) -> AsyncIterator[list[Payload]]:  # ty: ignore[incompatible-method-override]
         opened = [self.payload]
         yield opened
         opened.clear()

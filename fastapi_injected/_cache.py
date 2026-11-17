@@ -37,7 +37,7 @@ def _cache_key(key: DependencyCacheKey, /) -> DependencyCacheKey:
     # done, the entry has to stay reachable for the rest of the context
     call, *rest = key
 
-    return (unwrap_proxy(call), *rest)  # type: ignore[ty:invalid-return-type]
+    return (unwrap_proxy(call), *rest)  # type: ignore[ty:invalid-explicit-return]
 
 
 class ContextCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):

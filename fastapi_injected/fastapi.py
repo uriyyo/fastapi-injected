@@ -128,8 +128,8 @@ def _wrap_build_middleware_stack(app: FastAPI) -> None:
     def _build_middleware_stack_wrapper() -> ASGIApp:
         return InjectionMiddleware(_build_middleware_stack())
 
-    app.build_middleware_stack = _build_middleware_stack_wrapper  # type: ignore[ty:invalid-assignment]
-    app.build_middleware_stack.__patched__ = True  # type: ignore[ty:unresolved-attribute]
+    app.build_middleware_stack = _build_middleware_stack_wrapper
+    app.build_middleware_stack.__patched__ = True  # type: ignore[ty:missing-attribute]
 
 
 def _is_build_middleware_stack_patched(app: FastAPI) -> bool:

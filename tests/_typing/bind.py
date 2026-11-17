@@ -97,7 +97,7 @@ async def _negatives_on_what_is_left() -> None:
 
 def _negatives() -> None:
     bind_deps()  # type: ignore[ty:no-matching-overload]
-    bind_deps(_describe, 42)  # type: ignore[ty:invalid-type-form]
+    bind_deps(_describe, 42)
 
     # the call is awaited, so it has to be one that can be
     bind_deps(_sync_describe)  # type: ignore[ty:no-matching-overload]

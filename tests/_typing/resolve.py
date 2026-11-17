@@ -59,7 +59,7 @@ async def _negatives() -> None:
     await resolve()  # type: ignore[ty:no-matching-overload]
 
     # what `resolve` returns is the dependency, not the marker
-    _ = (await resolve(Container)).unknown  # type: ignore[ty:unresolved-attribute]
+    _ = (await resolve(Container)).unknown  # type: ignore[ty:missing-attribute]
 
 
 class CallableDep:
