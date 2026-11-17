@@ -1,6 +1,6 @@
 [project]
 name = "fastapi-injected"
-version = "0.4.1"
+version = "0.4.2"
 description = "Yet another library to reuse fastapi dependency injection"
 authors = [
     { name = "Yurii Karabas", email = "1998uriyyo@gmail.com" },
@@ -15,6 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
