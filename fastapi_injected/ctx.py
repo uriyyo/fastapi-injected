@@ -12,6 +12,7 @@ from dataclasses import field, replace
 from typing import Any, Self, cast
 from urllib.parse import urlencode
 
+from anyio import CancelScope
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.dependencies.models import Dependant
 from fastapi.encoders import jsonable_encoder
@@ -21,6 +22,7 @@ from starlette.requests import HTTPConnection
 from starlette.types import Message, Scope
 from starlette.websockets import WebSocketState
 
+from ._body import BODY_CACHE_KEY
 from ._cache import ContextCache, overridden_calls
 from ._dataclass import MakeDataclass
 from ._overrides import Overrides, normalize_overrides
@@ -110,6 +112,7 @@ def _dummy_request(
         pass
 
     scope = _dummy_scope()
+    scope[BODY_CACHE_KEY] = {}
 
     if app is not None:
         scope["app"] = app
@@ -168,14 +171,6 @@ class _ReboundRequest(Request):
     async def _get_form(self, **kwargs: Any) -> FormData:
         return await self._origin._get_form(**kwargs)  # noqa: SLF001
 
-    @property
-    def _form(self) -> FormData | None:
-        return self._origin._form  # noqa: SLF001
-
-    @_form.setter
-    def _form(self, _: FormData | None) -> None:
-        pass
-
     async def close(self) -> None:
         await self._origin.close()
 
@@ -208,6 +203,9 @@ def _rebind_request(
     *,
     extra_scope: Scope,
 ) -> BoundConnection:
+    # shared by every context of the request
+    request.scope.setdefault(BODY_CACHE_KEY, {})
+
     scope = {**request.scope, **extra_scope}
 
     if isinstance(request, WebSocket):
@@ -346,6 +344,8 @@ async def injection_ctx(
         extra_scope: Scope = {
             "fastapi_inner_astack": stack,
             "fastapi_function_astack": stack,
+            # entered here, not by fastapi inside a task group
+            "fastapi_async_cleanup_scopes": {stack: stack.enter_context(CancelScope())},
         }
 
         request = (

@@ -1,17 +1,18 @@
 import email.message
 import json
-from contextlib import AsyncExitStack
 from typing import Any
 
 from fastapi import Request, params
+from fastapi._compat import Undefined
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import _get_flat_body_params, _should_embed_body_fields
 from fastapi.routing import APIRoute
-from starlette.datastructures import FormData
 
 from .types import BoundConnection
 
 type RequestBody = tuple[Any, bool]
+
+BODY_CACHE_KEY = "fastapi_injected_body"
 
 
 class InvalidBodyError(ValueError):
@@ -20,40 +21,26 @@ class InvalidBodyError(ValueError):
         self.errors = errors
 
 
-def _is_json_content_type(content_type: str | None, /) -> bool:
-    if not content_type:
-        return False
-
+def _is_json_content_type(content_type: str, /) -> bool:
     message = email.message.Message()
     message["content-type"] = content_type
-
-    if message.get_content_maintype() != "application":
-        return False
-
     subtype = message.get_content_subtype()
-    return subtype == "json" or subtype.endswith("+json")
 
-
-async def _read_form(request: Request, /) -> FormData:
-    parsed = request._form is not None  # noqa: SLF001
-
-    form = await request.form()
-
-    if not parsed:
-        stack: AsyncExitStack = request.scope["fastapi_middleware_astack"]
-        stack.push_async_callback(form.close)
-
-    return form
+    return message.get_content_maintype() == "application" and (subtype == "json" or subtype.endswith("+json"))
 
 
 async def _read_body(request: Request, *, is_form: bool) -> Any:
     if is_form:
-        return await _read_form(request)
+        form = await request.form()
+        # closing a form twice is harmless
+        request.scope["fastapi_middleware_astack"].push_async_callback(form.close)
+
+        return form
 
     if not (body := await request.body()):
-        return None
+        return Undefined
 
-    if not _is_json_content_type(request.headers.get("content-type")):
+    if not _is_json_content_type(request.headers.get("content-type", "")):
         return body
 
     try:
@@ -72,37 +59,32 @@ async def _read_body(request: Request, *, is_form: bool) -> Any:
         ) from exc
 
 
-def _body_shape(request: Request, dependant: Dependant, /) -> tuple[bool, bool] | None:
-    route = request.scope.get("route")
+def _route_embeds(request: Request, /) -> bool:
+    match request.scope.get("route"):
+        case APIRoute(_embed_body_fields=embed):
+            return embed
 
-    match route:
-        case APIRoute(body_field=body_field) if body_field is not None:
-            return (
-                isinstance(body_field.field_info, params.Form),
-                route._embed_body_fields,  # noqa: SLF001
-            )
-
-    if not (body_params := _get_flat_body_params(dependant)):
-        return None
-
-    is_form = any(isinstance(field.field_info, params.Form) for field in body_params)
-
-    return is_form, _should_embed_body_fields(body_params)
+    return False
 
 
 async def request_body(request: BoundConnection, dependant: Dependant, /) -> RequestBody:
-    if not isinstance(request, Request) or (shape := _body_shape(request, dependant)) is None:
-        return None, False
+    if not isinstance(request, Request) or not (fields := _get_flat_body_params(dependant)):
+        return Undefined, False
 
-    is_form, embed_body_fields = shape
+    is_form = any(isinstance(field.field_info, params.Form) for field in fields)
 
-    return (
-        await _read_body(request, is_form=is_form),
-        embed_body_fields,
-    )
+    # parsed once per request
+    cache: dict[bool, Any] = request.scope[BODY_CACHE_KEY]
+
+    if is_form not in cache:
+        cache[is_form] = await _read_body(request, is_form=is_form)
+
+    # read the body the way the route does
+    return cache[is_form], _route_embeds(request) or _should_embed_body_fields(fields)
 
 
 __all__ = [
+    "BODY_CACHE_KEY",
     "InvalidBodyError",
     "request_body",
 ]

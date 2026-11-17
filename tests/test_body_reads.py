@@ -131,15 +131,8 @@ async def route_then_nested(item: Item, request: Request) -> list[str]:
     async def _fresh(*, fresh: ItemDep = Injected) -> str:
         return fresh.name
 
-    # the route took the whole body as the item, so a field embedded under a name is not there
-    try:
-        await resolve(Name)
-    except DependencyResolutionError as exc:
-        mismatch = [error["type"] for error in exc.errors]
-    else:  # pragma: no cover
-        mismatch = []
-
-    return [item.name, await _fresh(), (await request.json())["name"], *mismatch]
+    # fastapi decides embedding per dependency
+    return [item.name, await _fresh(), (await request.json())["name"], await resolve(Name)]
 
 
 @app.post("/form-model")
@@ -205,7 +198,7 @@ def test_concurrent_resolves_share_one_read() -> None:
 
 
 def test_route_body_is_not_read_again_by_a_fresh_ctx() -> None:
-    assert client.post("/route-then-nested", json={"name": "d"}).json() == ["d", "d", "d", "string_type"]
+    assert client.post("/route-then-nested", json={"name": "d"}).json() == ["d", "d", "d", "d"]
     assert counting.reads == [1]
 
 

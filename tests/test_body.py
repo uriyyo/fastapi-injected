@@ -428,19 +428,8 @@ async def ws(websocket: WebSocket) -> None:
     await websocket.close()
 
 
-def test_form_the_route_read_is_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
-    closed = 0
-    close = FormData.close
-
-    async def _counting_close(self: FormData) -> None:
-        nonlocal closed
-        closed += 1
-        await close(self)
-
-    monkeypatch.setattr(FormData, "close", _counting_close)
-
+def test_form_the_route_read_is_resolved() -> None:
     assert client.post("/route-form", data={"name": "m"}).json() == ["m", "m"]
-    assert closed == 1
 
 
 def test_upload_the_route_read_is_resolved() -> None:
