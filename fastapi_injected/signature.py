@@ -7,8 +7,9 @@ from typing import Annotated, Any, NotRequired, Self, TypedDict, Unpack, cast
 from fastapi import params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_typed_signature
+from typing_inspection.typing_objects import is_typealiastype
 
-from ._deps_tp import DependsSource, as_depends, is_arg, is_dep, is_request_param
+from ._deps_tp import DependsSource, as_depends, is_arg, is_dep, is_request_param, unwrap_tp
 from .types import Func, HasSignature, Injected
 
 
@@ -170,6 +171,10 @@ class Signature(inspect.Signature):
 
             if param.default is Injected:
                 param = param.replace(default=inspect.Parameter.empty)
+
+            if is_typealiastype(param.annotation):
+                # FastAPI would evaluate the alias eagerly
+                param = param.replace(annotation=unwrap_tp(param.annotation))
 
             return param
 

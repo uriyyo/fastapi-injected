@@ -1,3 +1,4 @@
+import sys
 import types
 import typing
 from collections.abc import Callable
@@ -10,10 +11,23 @@ from typing_inspection.typing_objects import is_typealiastype
 from .types import ArgMarker, HasDependsHook
 
 
+def _alias_value(alias: Any, /) -> Any:
+    try:
+        return alias.__value__
+    except NameError:
+        # a `TYPE_CHECKING`-only name: leave it a forward reference
+        if sys.version_info < (3, 14):
+            raise
+
+        from annotationlib import Format, call_evaluate_function  # noqa: PLC0415
+
+        return call_evaluate_function(alias.evaluate_value, Format.FORWARDREF)
+
+
 def unwrap_tp(tp: Any) -> Any:
     # PEP 695 aliases can be nested, e.g. `type A = B` where `type B = Annotated[...]`
     while is_typealiastype(tp):
-        tp = tp.__value__
+        tp = _alias_value(tp)
 
     return tp
 
