@@ -2,15 +2,27 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import pytest
-from fastapi import Depends, FastAPI, Header, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Header,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    routing,
+    status,
+)
+from fastapi.dependencies import utils
 from fastapi.testclient import TestClient
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketState
 
-from fastapi_injected import Dep, Injected, add_injection, inject, injection_ctx, resolve
+from fastapi_injected import Dep, DependencyResolutionError, Injected, add_injection, inject, injection_ctx, resolve
 from fastapi_injected.ctx import InjectionContext
-from fastapi_injected.fastapi import InjectionMiddleware, bind_injection_ctx
+from fastapi_injected.fastapi import InjectionMiddleware, install_dependency_cache
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -140,7 +152,7 @@ def test_add_injection_is_idempotent() -> None:
     assert isinstance(stack, InjectionMiddleware)
     assert not isinstance(stack.app, InjectionMiddleware)
     assert [middleware.cls for middleware in other_app.user_middleware] == [GZipMiddleware]
-    assert [dep.dependency for dep in other_app.router.dependencies] == [bind_injection_ctx, _item_id_dep]
+    assert [dep.dependency for dep in other_app.router.dependencies] == [_item_id_dep]
 
 
 @app.get("/middleware")
@@ -394,3 +406,109 @@ async def ws_new_ctx_route(websocket: WebSocket, container: Dep[Container]) -> N
 def test_websocket_new_ctx_is_fresh() -> None:
     with client.websocket_connect("/ws/new-ctx") as ws:
         assert ws.receive_json() == {"is_fresh": True}
+
+
+async def _trace(x_trace: Annotated[str, Header()]) -> str:
+    return x_trace
+
+
+def _resolution_app(**kwargs: bool) -> FastAPI:
+    resolving_app = FastAPI()
+    add_injection(resolving_app, **kwargs)
+
+    @resolving_app.get("/trace")
+    async def trace_route() -> str:
+        return await resolve(_trace)
+
+    @resolving_app.websocket("/trace")
+    async def trace_ws(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_text(await resolve(_trace))
+
+    return resolving_app
+
+
+def test_a_failed_resolve_is_a_422() -> None:
+    resolving_client = TestClient(_resolution_app())
+
+    result = resolving_client.get("/trace")
+
+    assert result.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert result.json()["detail"][0]["loc"] == ["header", "x-trace"]
+    assert resolving_client.get("/trace", headers={"x-trace": "abc"}).json() == "abc"
+
+
+def test_a_failed_resolve_closes_a_websocket_as_invalid() -> None:
+    with (
+        TestClient(_resolution_app()).websocket_connect("/trace") as ws,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+    ):
+        ws.receive_text()
+
+    assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
+
+
+def test_the_resolution_handler_can_be_left_out() -> None:
+
+    resolving_app = _resolution_app(handle_resolution_errors=False)
+
+    assert DependencyResolutionError not in resolving_app.exception_handlers
+
+
+def test_a_resolution_handler_already_registered_is_kept() -> None:
+
+    async def mine(_: Request, __: Exception) -> Response:
+        return Response(status_code=status.HTTP_400_BAD_REQUEST)  # pragma: no cover
+
+    other_app = FastAPI()
+    other_app.add_exception_handler(DependencyResolutionError, mine)
+    add_injection(other_app)
+
+    assert other_app.exception_handlers[DependencyResolutionError] is mine
+
+
+def test_the_dependency_cache_is_installed_once() -> None:
+
+    install_dependency_cache()
+    patched = utils.solve_dependencies, routing.solve_dependencies
+
+    install_dependency_cache()
+    add_injection(FastAPI())
+
+    assert (utils.solve_dependencies, routing.solve_dependencies) == patched
+    assert not getattr(patched[0].__wrapped__, "__fastapi_injected_patched__", False)
+
+
+@pytest.mark.parametrize("before_routes", [True, False])
+def test_the_context_is_bound_to_the_route_whenever_add_injection_is_called(before_routes: bool) -> None:
+
+    ordered_app = FastAPI()
+    router = APIRouter()
+
+    if before_routes:
+        add_injection(ordered_app)
+
+    @router.get("/items/{item_id}")
+    async def item(item_id: int) -> str:
+        ctx = InjectionContext.current()
+        assert ctx is not None
+        return ctx.bound_request.path_params["item_id"]
+
+    @router.websocket("/ws/{item_id}")
+    async def ws(websocket: WebSocket, item_id: int) -> None:
+        await websocket.accept()
+        ctx = InjectionContext.current()
+        assert ctx is not None
+        await websocket.send_text(ctx.bound_request.path_params["item_id"])
+
+    ordered_app.include_router(router)
+
+    if not before_routes:
+        add_injection(ordered_app)
+
+    ordered_client = TestClient(ordered_app)
+
+    assert ordered_client.get("/items/7").json() == "7"
+
+    with ordered_client.websocket_connect("/ws/8") as websocket:
+        assert websocket.receive_text() == "8"

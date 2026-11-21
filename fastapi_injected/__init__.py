@@ -1,7 +1,15 @@
 from ._bind import bind_deps
 from ._given import Given
 from ._not_none import NotNone
-from .ctx import InjectionContext, UnboundContextError, injection_ctx, set_default_app, synthetic_request
+from .ctx import (
+    ContextValue,
+    InjectionContext,
+    NoInjectionContextError,
+    UnboundContextError,
+    injection_ctx,
+    set_default_app,
+    synthetic_request,
+)
 from .deps import DependencyResolutionError, UnnamedParamError
 from .fastapi import add_injection
 from .inject import inject
@@ -12,6 +20,7 @@ from .types import Arg, Dep, DepFactory, Injected
 
 __all__ = [
     "Arg",
+    "ContextValue",
     "Dep",
     "DepFactory",
     "DependencyResolutionError",
@@ -19,6 +28,7 @@ __all__ = [
     "Given",
     "Injected",
     "InjectionContext",
+    "NoInjectionContextError",
     "NotADependencyError",
     "NotNone",
     "UnboundContextError",

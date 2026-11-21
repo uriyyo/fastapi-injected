@@ -1,18 +1,27 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
-from functools import wraps
-from typing import TYPE_CHECKING, Any
+from functools import cache, wraps
+from typing import Any, cast
 
-from fastapi import Depends, FastAPI, Request, WebSocket, routing
+from fastapi import FastAPI, Request, Response, WebSocket, routing
 from fastapi.dependencies import utils
+from fastapi.dependencies.models import Dependant
+from fastapi.dependencies.utils import _solve_generator, get_dependant
+from fastapi.exception_handlers import (
+    request_validation_exception_handler,
+    websocket_request_validation_exception_handler,
+)
+from fastapi.exceptions import WebSocketRequestValidationError
 from starlette.requests import HTTPConnection
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, ExceptionHandler, Message, Receive, Scope, Send
 
 from ._cache import ContextCache
 from .ctx import injection_ctx, set_default_app
+from .deps import DependencyResolutionError
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 _DEPENDENCY_CACHE_KEY = "__fastapi_injected_dependency_cache__"
+_BOUND_KEY = "__fastapi_injected_bound__"
 
 
 class MissingDependencyCacheError(Exception):
@@ -32,10 +41,11 @@ async def _unavailable_send(_: Message) -> None:
     raise ConnectionNotAvailableError
 
 
-if not TYPE_CHECKING:
-    _base_solve_dependencies = utils.solve_dependencies
+_PATCHED_MARKER = "__fastapi_injected_patched__"
 
-    @wraps(_base_solve_dependencies)
+
+def _patched_solve_dependencies(base: Callable[..., Any], /) -> Callable[..., Any]:
+    @wraps(base)
     async def _solve_dependencies(
         *,
         request: Request | WebSocket,
@@ -52,14 +62,29 @@ if not TYPE_CHECKING:
 
             request.scope[_DEPENDENCY_CACHE_KEY] = dependency_cache
 
-        return await _base_solve_dependencies(
+            # the first solve of a request under `InjectionMiddleware` binds its context to the route's connection
+            if request.scope.get(_BOUND_KEY) is False:
+                await _solve_generator(
+                    dependant=_bind_dependant(),
+                    stack=request.scope["fastapi_inner_astack"],
+                    sub_values={"connection": request},
+                    request=request,
+                )
+
+        return await base(
             request=request,
             dependency_cache=dependency_cache,
             **kwargs,
         )
 
-    utils.solve_dependencies = _solve_dependencies
-    routing.solve_dependencies = _solve_dependencies
+    setattr(_solve_dependencies, _PATCHED_MARKER, True)
+    return _solve_dependencies
+
+
+def install_dependency_cache() -> None:
+    for module in (utils, routing):
+        if not getattr(module.solve_dependencies, _PATCHED_MARKER, False):
+            setattr(module, "solve_dependencies", _patched_solve_dependencies(module.solve_dependencies))  # noqa: B010
 
 
 def _get_dependency_cache(connection: HTTPConnection) -> DependencyCache:
@@ -86,6 +111,12 @@ async def bind_injection_ctx(connection: HTTPConnection) -> AsyncGenerator[None]
     if not isinstance(connection, Request | WebSocket):  # pragma: no cover
         raise TypeError(f"expected a Request or a WebSocket, got {type(connection).__name__}")
 
+    if connection.scope.get(_BOUND_KEY):
+        yield
+        return
+
+    connection.scope[_BOUND_KEY] = True
+
     # the connection of the route: the middleware context, if any, was bound before routing
     async with injection_ctx(
         dependency_cache=_get_dependency_cache(connection),
@@ -95,9 +126,17 @@ async def bind_injection_ctx(connection: HTTPConnection) -> AsyncGenerator[None]
         yield
 
 
+@cache
+def _bind_dependant() -> Dependant:
+    return get_dependant(path="", call=bind_injection_ctx)
+
+
 @dataclass
 class InjectionMiddleware:
     app: ASGIApp
+
+    def __post_init__(self) -> None:
+        install_dependency_cache()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         connection: BoundConnection
@@ -112,6 +151,7 @@ class InjectionMiddleware:
                 return
 
         scope[_DEPENDENCY_CACHE_KEY] = cache = {}
+        scope[_BOUND_KEY] = False
 
         async with injection_ctx(
             dependency_cache=cache,
@@ -136,17 +176,36 @@ def _is_build_middleware_stack_patched(app: FastAPI) -> bool:
     return getattr(app.build_middleware_stack, "__patched__", False)
 
 
+async def dependency_resolution_handler(connection: HTTPConnection, exc: Exception) -> Response | None:
+    unresolved = cast("DependencyResolutionError", exc)
+
+    if isinstance(connection, WebSocket):
+        await websocket_request_validation_exception_handler(
+            connection,
+            WebSocketRequestValidationError(unresolved.errors),
+        )
+        return None
+
+    return await request_validation_exception_handler(
+        cast("Request", connection),
+        unresolved.as_validation_error(),
+    )
+
+
 def add_injection(
     app: FastAPI,
     /,
+    *,
+    handle_resolution_errors: bool = True,
 ) -> None:
+    install_dependency_cache()
     set_default_app(app)
 
     if not _is_build_middleware_stack_patched(app):
         _wrap_build_middleware_stack(app)
 
-    if not any(dep.dependency is bind_injection_ctx for dep in app.router.dependencies):
-        app.router.dependencies.insert(0, Depends(bind_injection_ctx))
+    if handle_resolution_errors and DependencyResolutionError not in app.exception_handlers:
+        app.add_exception_handler(DependencyResolutionError, cast("ExceptionHandler", dependency_resolution_handler))
 
 
 __all__ = [
@@ -155,4 +214,6 @@ __all__ = [
     "MissingDependencyCacheError",
     "add_injection",
     "bind_injection_ctx",
+    "dependency_resolution_handler",
+    "install_dependency_cache",
 ]

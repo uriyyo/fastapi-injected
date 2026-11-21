@@ -24,6 +24,7 @@ from starlette.datastructures import FormData
 from starlette.requests import HTTPConnection
 from starlette.types import Message, Scope
 from starlette.websockets import WebSocketState
+from typing_extensions import sentinel
 
 from ._body import BODY_CACHE_KEY
 from ._cache import ContextCache, overridden_calls
@@ -225,6 +226,7 @@ class InjectionContext(MakeDataclass):
     own_overrides: MutableMapping[Any, Any] = field(default_factory=dict, repr=False)
     inherit_cache: bool = field(default=False, repr=False)
     lock: RLock = field(default_factory=RLock, repr=False)
+    state: dict[ContextValue[Any], Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def current(cls) -> Self | None:
@@ -301,10 +303,42 @@ class InjectionContext(MakeDataclass):
                 self,
                 parent=self,
                 dependency_cache={},
+                state={},
                 inherit_cache=True,
                 own_overrides=normalize_overrides(overrides, provider=provider),
             ),
         )
+
+
+class NoInjectionContextError(LookupError):
+    def __init__(self) -> None:
+        super().__init__("no injection context is open")
+
+
+MISSING = sentinel("MISSING")
+
+
+@dataclass(frozen=True, eq=False)
+class ContextValue[T]:
+    name: str
+    default: T | MISSING = field(default=MISSING, kw_only=True)
+
+    def get(self) -> T:
+        if (ctx := InjectionContext.current()) is not None:
+            for owner in ctx.chain:
+                if self in owner.state:
+                    return owner.state[self]
+
+        if self.default is MISSING:
+            raise LookupError(f"{self.name} is not set")
+
+        return self.default
+
+    def set(self, value: T, /) -> None:
+        if (ctx := InjectionContext.current()) is None:
+            raise NoInjectionContextError
+
+        ctx.state[self] = value
 
 
 @contextmanager
@@ -483,7 +517,9 @@ async def ensure_injection_ctx(
 
 
 __all__ = [
+    "ContextValue",
     "InjectionContext",
+    "NoInjectionContextError",
     "OverrideBlock",
     "UnboundContextError",
     "ensure_injection_ctx",

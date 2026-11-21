@@ -163,6 +163,27 @@ async with injection_ctx(request=request):
 
 Analysing a dependency is the expensive part of resolving one, so the result is cached — keyed by the dependency itself, not by whatever object carried it, so nothing that only passed through is kept alive. Only dependencies written in source code are cached this way: functions and classes, and annotations built from them. One made at runtime — `Given(...)`, a `MakeInjected` or `bind_deps` result, an object that brings its own `Depends` — is analysed again on every resolve, and FastAPI never gets to keep it: what it carries is released with the resolve instead of living as long as the process. `clear_dependant_cache()` drops the cache, for long-lived processes and test suites that want the memory back.
 
+### Values scoped to a context
+
+`ContextValue` is a `ContextVar` that lives as long as an injection context - inside a route, as long as the request. `set` writes to the current context, `get` reads the nearest one that has it: a nested context sees the value, but what it sets stays in it.
+
+```python
+from fastapi_injected import ContextValue
+
+tenant = ContextValue[str]("tenant", default="public")
+
+
+def set_tenant(x_tenant: Annotated[str, Header()]) -> None:
+    tenant.set(x_tenant)
+
+
+@app.get("/", dependencies=[Depends(set_tenant)])
+async def route() -> str:
+    return tenant.get()  # this request's tenant
+```
+
+Without a default, `get` raises `LookupError` when nothing set it; `set` outside a context raises `NoInjectionContextError`.
+
 ### Overriding dependencies
 
 `push_overrides` swaps dependencies out for the duration of a `with` block — handy in tests, or anywhere you need to run the same code against a different implementation:
@@ -364,7 +385,24 @@ class IsOwner(MakeInjected):
 await resolve(IsOwner(doc=Given(doc), role=RoleDep))
 ```
 
+The call has to be an `async def`; a sync one raises `NotAsyncError`, as it does for `bind_deps` and `remap_dep_args`.
+
 It is a `MakeDataclass`, so instances built from equal markers are equal — and therefore one dependency, resolved once per context and overridable as a whole. For callables that are not dataclasses, the two halves of the binding are available on their own: `signature_with_deps(func, deps)` builds the signature, and `remap_dep_args` turns the arguments it names back into positional ones.
+
+### Objects that bring their own `Depends`
+
+An object with a `__get_depends__()` method is resolved through the `Depends` it returns instead of its own call - by `resolve`, `as_depends`, `add_route_dependency` and `reflect`. The protocol is `fastapi_injected.types.HasDependsHook`:
+
+```python
+class Guarded:
+    def __call__(self) -> None: ...
+
+    def __get_depends__(self) -> params.Depends:
+        return Depends(require_admin, use_cache=False)
+
+
+await resolve(Guarded())  # resolves `require_admin`
+```
 
 ### Inspecting annotations
 
@@ -373,6 +411,10 @@ It is a `MakeDataclass`, so instances built from equal markers are equal — and
 - `is_dep(tp)` — whether `tp` is a `Dep`/`DepFactory` annotation.
 - `unwrap_dep_tp(tp)` — the annotated type (`Any` for a bare `Dep`).
 - `unwrap_dep_dependency(tp)` — the callable that resolves it: the factory for `DepFactory[T, factory]`, the type itself for `Dep[T]`.
+- `is_request_param(tp)` — whether `tp` carries `Header()`, `Query()`, `Path()`, `Cookie()` or a body marker.
+- `unwrap_tp(tp)` — the value of a PEP 695 `type` alias, through nested aliases.
+- `annotated(tp, *metadata)` — `Annotated[tp, *metadata]` without typing's cache, which would keep runtime markers alive.
+- `as_depends(dep)` — the `Depends` for a marker, a `__get_depends__` object or a callable (`DependsSource`).
 
 ### Reflecting on apps and dependency trees
 
@@ -403,21 +445,34 @@ assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
 - `match_route(app, request_or_scope)` — `(path_template, route)` for the route that would handle a request, through mounts, hosts and included routers; `None` when nothing matches. Useful in middleware, where `request.scope["route"]` is not set yet.
 - `iter_params(root)` — `(dependant, kind, field)` for every path, query, header, cookie and body parameter in the tree.
 - `response_type(route, *, strip=True)` — the route's response type, falling back to the endpoint's return annotation, with `Annotated` and `| None` stripped unless `strip=False`.
-- `Signature`, in `fastapi_injected.signature`, is an `inspect.Signature` with operations for decorators and dependencies that need FastAPI to see parameters a function did not declare. `Signature.of(func_or_signature)` starts one; each operation returns a new `Signature`, and `.apply(func)` sets it on a function.
+- `Signature`, in `fastapi_injected.signature`, is an `inspect.Signature` with operations for decorators and dependencies that need FastAPI to see parameters a function did not declare. `Signature.of(func_or_signature)` starts one; each operation returns a new `Signature`, and `.apply(func)` sets it on a function. `globalns=`/`localns=` add names its annotations need beyond the module of `func`, and `include_return=True` keeps the return annotation.
   - `.add(*parameters)` — extra keyword-only parameters before `**kwargs`; names already present are kept as they are.
   - `.drop(*names)` and `.update(name, **changes)` — drop parameters a wrapper consumes itself, or change one parameter's annotation, default or kind.
   - `.add_dep(name, dep, *, annotation=Any)` — a parameter FastAPI resolves with a `Depends`/`Security` marker or a callable.
   - `.prepend(*parameters)`, `.rename(old, new)` and `.returns(annotation)` — positional parameters at the front, a renamed parameter, a new return annotation.
   - `Signature.role(parameter)` — which `ParamRole` a parameter plays: `dep` for `Dep[...]` or a `Depends` default, `request` for `Header()`/`Query()`/..., `arg` for `Arg[...]`, `plain` otherwise. `.select(*roles)` yields the parameters with those roles; `.annotations` and `.defaults` are name-to-value mappings of what is declared.
   - `.wrap(func)` — a forwarder to `func`, async when `func` is, carrying this signature; `.apply(func)` sets the signature on `func` itself.
-- `add_route_dependency(route, *deps)` — append dependencies to an `APIRoute` that is already built, and rebuild what FastAPI derived from its dependencies. Call it before the route's router is included elsewhere: an included router keeps its own copy until its routes change.
+- `add_route_dependency(route, *deps)` — append dependencies to an `APIRoute` or `APIWebSocketRoute` that is already built, and rebuild what FastAPI derived from its dependencies. Call it before the route's router is included elsewhere: an included router keeps its own copy until its routes change.
 - `add_lifespan(app_or_router, lifespan)` — run a lifespan inside the one already set, merging the state both yield, for libraries that need a startup step on an app they did not create.
 
 `root` for the dependency helpers is a `Dependant`, a `Depends(...)` marker or a plain callable; `as_dependant` is the conversion they share. A plain callable is read the way FastAPI would, with `Injected` defaults treated as dependencies.
 
+### Adding to the OpenAPI schema
+
+`fastapi_injected.openapi` gives libraries one shared `app.openapi` to add to, instead of each replacing it. The schema is cached in `app.openapi_schema` until `invalidate_openapi(app)`.
+
+- `add_openapi_hook(app, hook)` — `hook(app, schema)` post-processes the schema, in the order hooks were added; it changes `schema` in place or returns a new one.
+- `__doc_depends__(methods)` — dependencies a call resolves itself, documented for every route that has it anywhere in its dependency tree (`HasDocDepends`, `iter_doc_depends(route)`). `add_openapi(app)` enables it without a hook.
+
+A custom `app.openapi` is kept, and hooks run on its result.
+
+```python
+add_openapi_hook(app, lambda app, schema: {**schema, "x-version": "1"})
+```
+
 ### FastAPI request integration
 
-Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injection`: it adds `InjectionMiddleware`, which opens the context for the whole request, and the `bind_injection_ctx` dependency, which binds it to the connection of the route. Add it after your other middleware, so the context is open for them too:
+Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injection`: it adds `InjectionMiddleware`, which opens the context for the whole request and binds it to the route's connection once the route is found - before or after routers are included. FastAPI is patched by `add_injection` or `InjectionMiddleware`, not on import. Add it after your other middleware, so the context is open for them too:
 
 ```python
 from fastapi import FastAPI
@@ -443,6 +498,8 @@ set_default_app(worker_app)  # for the rest of the process
 with set_default_app(test_app):  # only inside the block
     await job()
 ```
+
+A `resolve()` failing inside a route answers with a 422, or closes a websocket: `add_injection` registers `dependency_resolution_handler` unless a handler for `DependencyResolutionError` exists or `handle_resolution_errors=False` is passed.
 
 The default lives in a context variable, so it reaches the tasks started after it is set: set it at startup, not inside a task that other tasks will not see.
 
@@ -504,19 +561,20 @@ The root package is what you need to use the library, and the surface a release 
 | --- | --- |
 | Markers | `Dep`, `DepFactory`, `Arg`, `Given`, `Injected` |
 | Resolving | `inject`, `resolve`, `bind_deps`, `NotNone` |
-| Contexts and overrides | `InjectionContext`, `injection_ctx`, `synthetic_request`, `set_default_app`, `push_overrides`, `override_app`, `ValueOverride`, `FactoryOverride` |
+| Contexts and overrides | `InjectionContext`, `injection_ctx`, `ContextValue`, `synthetic_request`, `set_default_app`, `push_overrides`, `override_app`, `ValueOverride`, `FactoryOverride` |
 | FastAPI integration | `add_injection` |
-| Errors | `DependencyResolutionError`, `NotADependencyError`, `UnboundContextError`, `UnnamedParamError` |
+| Errors | `DependencyResolutionError`, `NoInjectionContextError`, `NotADependencyError`, `UnboundContextError`, `UnnamedParamError` |
 
 Code that builds on the library imports from the submodule that owns the piece. These are public too:
 
 | Module | Names |
 | --- | --- |
-| `fastapi_injected.ext` | `MakeDataclass`, `MakeInjected`, `signature_with_deps`, `remap_dep_args`, `is_dep`, `is_arg`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `strip_annotation`, `as_depends`, `clear_dependant_cache`, `ensure_injection_ctx`, `MissedDependencyError`, `UnboundDepArgsError` |
+| `fastapi_injected.ext` | `MakeDataclass`, `MakeInjected`, `signature_with_deps`, `remap_dep_args`, `is_dep`, `is_arg`, `is_request_param`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `unwrap_tp`, `strip_annotation`, `annotated`, `as_depends`, `DependsSource`, `clear_dependant_cache`, `ensure_injection_ctx`, `MissedDependencyError`, `NotAsyncError`, `UnboundDepArgsError` |
 | `fastapi_injected.types` | `DepOf`, `ArgMarker`, `HasDependsHook`, and the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro`, `BoundConnection`, `DependencyCache` and friends |
-| `fastapi_injected.overrides` | `Overrides`, `OverridesProvider` |
+| `fastapi_injected.overrides` | `Overrides`, `OverridesProvider`, `OverrideBlock` |
 | `fastapi_injected.signature` | `Signature`, `ParamRole` |
-| `fastapi_injected.fastapi` | `InjectionMiddleware`, `bind_injection_ctx`, `MissingDependencyCacheError` |
+| `fastapi_injected.fastapi` | `InjectionMiddleware`, `bind_injection_ctx`, `dependency_resolution_handler`, `install_dependency_cache`, `MissingDependencyCacheError` |
+| `fastapi_injected.openapi` | `add_openapi_hook`, `add_openapi`, `invalidate_openapi`, `HasDocDepends`, `iter_doc_depends`, `OpenAPIHook` |
 | `fastapi_injected.reflect` | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
 
 Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.

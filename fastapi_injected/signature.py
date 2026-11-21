@@ -1,12 +1,12 @@
 import inspect
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from enum import StrEnum, auto
 from functools import wraps
 from typing import Annotated, Any, NotRequired, Self, TypedDict, Unpack, cast
 
 from fastapi import params
 from fastapi.dependencies.models import Dependant
-from fastapi.dependencies.utils import get_typed_signature
+from fastapi.dependencies.utils import get_typed_annotation, get_typed_signature
 from typing_inspection.typing_objects import is_typealiastype
 
 from ._deps_tp import DependsSource, as_depends, is_arg, is_dep, is_request_param, unwrap_tp
@@ -24,6 +24,32 @@ class NotADependencyError(TypeError):
 
 
 type SignatureSource = Callable[..., Any] | inspect.Signature
+
+
+def _typed_signature(
+    func: Callable[..., Any],
+    /,
+    *,
+    globalns: Mapping[str, Any] | None,
+    localns: Mapping[str, Any] | None,
+    include_return: bool,
+) -> inspect.Signature:
+    ns = {
+        **getattr(inspect.unwrap(func), "__globals__", {}),
+        **(globalns or {}),
+        **(localns or {}),
+    }
+
+    sign = inspect.signature(func)
+
+    returns = inspect.Signature.empty
+    if include_return and sign.return_annotation is not inspect.Signature.empty:
+        returns = get_typed_annotation(sign.return_annotation, ns)
+
+    return inspect.Signature(
+        [param.replace(annotation=get_typed_annotation(param.annotation, ns)) for param in sign.parameters.values()],
+        return_annotation=returns,
+    )
 
 
 class ParamRole(StrEnum):
@@ -44,12 +70,22 @@ class Signature(inspect.Signature):
     __slots__ = ()
 
     @classmethod
-    def of(cls, source: SignatureSource, /) -> Self:
+    def of(
+        cls,
+        source: SignatureSource,
+        /,
+        *,
+        globalns: Mapping[str, Any] | None = None,
+        localns: Mapping[str, Any] | None = None,
+        include_return: bool = False,
+    ) -> Self:
         match source:
             case inspect.Signature():
                 sign = source
-            case _:
+            case _ if globalns is None and localns is None and not include_return:
                 sign = get_typed_signature(source)
+            case _:
+                sign = _typed_signature(source, globalns=globalns, localns=localns, include_return=include_return)
 
         return cls(
             [*sign.parameters.values()],
@@ -209,6 +245,7 @@ class Signature(inspect.Signature):
 
             return self.apply(_async_call)
 
+        # generators too: FastAPI unwraps `__wrapped__` to tell what kind of call it is
         @wraps(func)
         def _call(*args: Any, **kwargs: Any) -> Any:
             return func(*args, **kwargs)

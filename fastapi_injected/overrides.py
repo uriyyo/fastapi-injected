@@ -43,6 +43,7 @@ def override_app(provider: HasMutableOverrides, overrides: Mapping[Any, Any], /)
 
 __all__ = [
     "FactoryOverride",
+    "OverrideBlock",
     "Overrides",
     "OverridesProvider",
     "ValueOverride",

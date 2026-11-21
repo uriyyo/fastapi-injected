@@ -4,8 +4,8 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, Header, Security, params
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, Depends, FastAPI, Header, Security, WebSocket, params
+from fastapi.routing import APIRoute, APIWebSocketRoute
 from fastapi.security import HTTPBearer
 from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
@@ -267,6 +267,67 @@ def test_add_route_dependency_rebuilds_the_route():
     # the parameterless dependency also ran on the rejected request
     assert seen == ["other", "t", "other"]
     assert app.openapi()["paths"]["/x"]["get"]["parameters"][0]["name"] == "token"
+
+
+def test_add_route_dependency_asks_an_object_for_its_depends():
+    seen: list[str] = []
+
+    def guard() -> None:
+        seen.append("guard")
+
+    class Hooked:
+        def __call__(self) -> None:
+            raise AssertionError("called instead of its own Depends")  # pragma: no cover
+
+        def __get_depends__(self) -> params.Depends:
+            return Depends(guard)
+
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x() -> int:
+        return 1
+
+    route = find_route(app, path="/x")
+    assert isinstance(route, APIRoute)
+    add_route_dependency(route, Hooked())
+
+    assert TestClient(app).get("/x").json() == 1
+    assert seen == ["guard"]
+
+
+@pytest.mark.parametrize("included", [False, True])
+def test_add_route_dependency_rebuilds_a_websocket_route(included: bool):
+    seen: list[str] = []
+
+    def guard(token: str) -> None:
+        seen.append(token)
+
+    def overridden() -> None:
+        seen.append("overridden")  # pragma: no cover
+
+    app = FastAPI()
+    router = APIRouter() if included else app.router
+
+    @router.websocket("/ws")
+    async def ws(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_text("ok")
+        await websocket.close()
+
+    route = find_route(router, path="/ws")
+    assert isinstance(route, APIWebSocketRoute)
+    add_route_dependency(route, guard, Depends(overridden))
+
+    if included:
+        app.include_router(router)
+
+    app.dependency_overrides[overridden] = lambda: seen.append("replaced")
+
+    with TestClient(app).websocket_connect("/ws", params={"token": "t"}) as websocket:
+        assert websocket.receive_text() == "ok"
+
+    assert seen == ["t", "replaced"]
 
 
 def test_websocket_routes_are_found():

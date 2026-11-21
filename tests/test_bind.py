@@ -15,7 +15,7 @@ from fastapi_injected import (
     push_overrides,
     resolve,
 )
-from fastapi_injected._bind import UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
+from fastapi_injected._bind import NotAsyncError, UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
 from fastapi_injected.ext import signature_with_deps
 
 pytestmark = pytest.mark.asyncio
@@ -187,3 +187,28 @@ async def test_more_dependencies_than_the_overloads_cover():
     bound = bind_deps(six, *(Given(number) for number in range(1, 7)))
 
     assert await resolve(bound) == 21
+
+
+def _sync_describe(doc: Doc, role: Role) -> str:
+    return f"{doc.title}:{role.name}"  # pragma: no cover
+
+
+async def _async_gen_describe(doc: Doc):
+    yield doc.title  # pragma: no cover
+
+
+@pytest.mark.parametrize("func", [_sync_describe, _async_gen_describe])
+async def test_only_async_functions_are_bound(func: Any) -> None:
+    with pytest.raises(NotAsyncError):
+        remap_dep_args(func)
+
+    with pytest.raises(NotAsyncError):
+        bind_deps(func, Given(Doc()))
+
+
+async def test_an_object_with_an_async_call_is_bound() -> None:
+    class Describe:
+        async def __call__(self, doc: Doc, role: Role) -> str:
+            return await describe(doc, role)
+
+    assert await resolve(bind_deps(Describe(), Given(Doc()), RoleDep)) == "readme:admin"

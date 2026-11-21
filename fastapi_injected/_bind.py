@@ -88,7 +88,23 @@ def take_dep_args(kwargs: dict[str, Any], /) -> list[Any]:
     return [kwargs.pop(dep_arg_name(index)) for index in indexes]
 
 
+class NotAsyncError(TypeError):
+    def __init__(self, func: Callable[..., Any], /) -> None:
+        super().__init__(f"{func!r} must be an async function")
+
+        self.func = func
+
+
+def _is_async_callable(func: Any, /) -> bool:
+    return inspect.iscoroutinefunction(inspect.unwrap(func)) or (
+        not inspect.isclass(func) and inspect.iscoroutinefunction(getattr(func, "__call__", None))  # noqa: B004
+    )
+
+
 def remap_dep_args[**P, R](func: AsyncFunc[P, R], /) -> AsyncFunc[P, R]:
+    if not _is_async_callable(func):
+        raise NotAsyncError(func)
+
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> R:
         return await func(*args, *take_dep_args(kwargs), **kwargs)
@@ -173,6 +189,7 @@ def bind_deps[**P, R](
 
 
 __all__ = [
+    "NotAsyncError",
     "UnboundDepArgsError",
     "bind_deps",
     "dep_arg_name",

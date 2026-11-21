@@ -2,7 +2,6 @@ from collections.abc import AsyncGenerator, Callable, Generator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, cast, runtime_checkable
 
-from fastapi import params
 from fastapi.dependencies.utils import (
     _get_body_field,
     get_typed_return_annotation,
@@ -11,15 +10,18 @@ from fastapi.routing import (
     APIRoute,
     APIWebSocketRoute,
     _build_dependant_with_parameterless_dependencies,
+    get_websocket_app,
     iter_route_contexts,
     request_response,
+    websocket_session,
 )
 from starlette.applications import Starlette
 from starlette.requests import HTTPConnection
 from starlette.routing import BaseRoute, Host, Match, Mount, Router
-from starlette.types import Lifespan, Scope
+from starlette.types import ASGIApp, Lifespan, Scope
+from starlette.websockets import WebSocket
 
-from fastapi_injected._deps_tp import DependsSource, strip_annotation
+from fastapi_injected._deps_tp import DependsSource, as_depends, strip_annotation
 
 
 def response_type(route: APIRoute, /, *, strip: bool = True) -> Any:
@@ -31,22 +33,33 @@ def response_type(route: APIRoute, /, *, strip: bool = True) -> Any:
     return strip_annotation(tp) if strip else tp
 
 
-def _to_dep(_arg: Any) -> params.Depends:
-    match _arg:
-        case params.Depends():
-            return _arg
-        case _:
-            return params.Depends(_arg)
+def _websocket_app(route: APIWebSocketRoute, /) -> ASGIApp:
+    async def app(websocket: WebSocket) -> None:
+        # a websocket route does not keep its overrides provider - the app serving it is in the scope
+        handler = get_websocket_app(
+            dependant=route.dependant,
+            dependency_overrides_provider=websocket.scope.get("app"),
+            embed_body_fields=route._embed_body_fields,  # noqa: SLF001
+        )
+
+        await handler(websocket)
+
+    return websocket_session(app)
 
 
-def add_route_dependency(route: APIRoute, /, *deps: DependsSource) -> None:
-    route.dependencies.extend(_to_dep(dep) for dep in deps)
+def add_route_dependency(route: APIRoute | APIWebSocketRoute, /, *deps: DependsSource) -> None:
+    route.dependencies.extend(as_depends(dep) for dep in deps)
 
     route.dependant, body_params, route._embed_body_fields = _build_dependant_with_parameterless_dependencies(  # noqa: SLF001
         path=route.path_format,
         call=route.endpoint,
         dependencies=route.dependencies,
     )
+
+    if isinstance(route, APIWebSocketRoute):
+        route.app = _websocket_app(route)
+        return
+
     route.body_field = _get_body_field(
         body_params=body_params,
         name=route.unique_id,
