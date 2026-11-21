@@ -7,6 +7,7 @@ from fastapi.params import Depends
 
 from ._calls import annotated
 from ._deps_tp import unwrap_tp
+from ._errors import InjectedError
 from .deps import _named_param
 from .signature import Signature
 from .types import AsyncFunc, DepOf, Func
@@ -14,7 +15,7 @@ from .types import AsyncFunc, DepOf, Func
 _DEP_ARG_PREFIX = "__dep_arg_"
 
 
-class UnboundDepArgsError(ValueError):
+class UnboundDepArgsError(InjectedError, ValueError):
     def __init__(self, indexes: Sequence[int], /) -> None:
         super().__init__(f"bound dependencies are not the leading ones: {sorted(indexes)}")
 
@@ -88,21 +89,23 @@ def take_dep_args(kwargs: dict[str, Any], /) -> list[Any]:
     return [kwargs.pop(dep_arg_name(index)) for index in indexes]
 
 
-class NotAsyncError(TypeError):
+class NotAsyncError(InjectedError, TypeError):
     def __init__(self, func: Callable[..., Any], /) -> None:
         super().__init__(f"{func!r} must be an async function")
 
         self.func = func
 
 
-def _is_async_callable(func: Any, /) -> bool:
+def is_async_callable(func: Any, /) -> bool:
+    """Whether calling `func` gives a coroutine - through `functools.partial`, `functools.wraps` and `__call__`."""
+
     return inspect.iscoroutinefunction(inspect.unwrap(func)) or (
         not inspect.isclass(func) and inspect.iscoroutinefunction(getattr(func, "__call__", None))  # noqa: B004
     )
 
 
 def remap_dep_args[**P, R](func: AsyncFunc[P, R], /) -> AsyncFunc[P, R]:
-    if not _is_async_callable(func):
+    if not is_async_callable(func):
         raise NotAsyncError(func)
 
     @wraps(func)
@@ -193,6 +196,7 @@ __all__ = [
     "UnboundDepArgsError",
     "bind_deps",
     "dep_arg_name",
+    "is_async_callable",
     "remap_dep_args",
     "signature_with_deps",
     "take_dep_args",

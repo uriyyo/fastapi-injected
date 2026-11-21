@@ -4,7 +4,22 @@ import pytest
 from fastapi import Depends, Header
 from fastapi.exceptions import RequestValidationError
 
-from fastapi_injected import DependencyResolutionError, Injected, inject, resolve
+from fastapi_injected import (
+    DependencyResolutionError,
+    DepFactory,
+    Injected,
+    InjectedError,
+    NoInjectionContextError,
+    NotADependencyError,
+    UnboundContextError,
+    UnnamedParamError,
+    UnsetContextValueError,
+    inject,
+    resolve,
+)
+from fastapi_injected.ext import InvalidMarkerError, MissedDependencyError, NotAsyncError, UnboundDepArgsError
+from fastapi_injected.fastapi import ConnectionNotAvailableError, MissingDependencyCacheError
+from fastapi_injected.reflect import RouteNotFoundError
 
 pytestmark = pytest.mark.asyncio
 
@@ -56,3 +71,28 @@ async def test_resolution_error_keeps_the_errors_in_its_args():
         await resolve(Trace)
 
     assert exc_info.value.args == (exc_info.value.errors,)
+
+
+async def test_every_error_is_an_injected_error():
+    errors = [
+        DependencyResolutionError,
+        UnnamedParamError,
+        NotADependencyError,
+        UnboundContextError,
+        NoInjectionContextError,
+        UnsetContextValueError,
+        MissedDependencyError,
+        NotAsyncError,
+        UnboundDepArgsError,
+        InvalidMarkerError,
+        MissingDependencyCacheError,
+        ConnectionNotAvailableError,
+        RouteNotFoundError,
+    ]
+
+    assert all(issubclass(error, InjectedError) for error in errors)
+
+
+async def test_a_wrong_dep_factory_shows_the_expected_form():
+    with pytest.raises(InvalidMarkerError, match=r"DepFactory\[Settings, get_settings\]"):
+        DepFactory[int]

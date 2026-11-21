@@ -182,7 +182,7 @@ async def route() -> str:
     return tenant.get()  # this request's tenant
 ```
 
-Without a default, `get` raises `LookupError` when nothing set it; `set` outside a context raises `NoInjectionContextError`.
+Without a default, `get` raises `UnsetContextValueError` - a `LookupError` - when nothing set it; `set` outside a context raises `NoInjectionContextError`.
 
 ### Overriding dependencies
 
@@ -412,6 +412,7 @@ await resolve(Guarded())  # resolves `require_admin`
 - `unwrap_dep_tp(tp)` — the annotated type (`Any` for a bare `Dep`).
 - `unwrap_dep_dependency(tp)` — the callable that resolves it: the factory for `DepFactory[T, factory]`, the type itself for `Dep[T]`.
 - `is_request_param(tp)` — whether `tp` carries `Header()`, `Query()`, `Path()`, `Cookie()` or a body marker.
+- `is_async_callable(func)` — whether calling `func` gives a coroutine, through `functools.partial`, `functools.wraps` and an object's `__call__`.
 - `unwrap_tp(tp)` — the value of a PEP 695 `type` alias, through nested aliases.
 - `annotated(tp, *metadata)` — `Annotated[tp, *metadata]` without typing's cache, which would keep runtime markers alive.
 - `as_depends(dep)` — the `Depends` for a marker, a `__get_depends__` object or a callable (`DependsSource`).
@@ -452,7 +453,7 @@ assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
   - `.prepend(*parameters)`, `.rename(old, new)` and `.returns(annotation)` — positional parameters at the front, a renamed parameter, a new return annotation.
   - `Signature.role(parameter)` — which `ParamRole` a parameter plays: `dep` for `Dep[...]` or a `Depends` default, `request` for `Header()`/`Query()`/..., `arg` for `Arg[...]`, `plain` otherwise. `.select(*roles)` yields the parameters with those roles; `.annotations` and `.defaults` are name-to-value mappings of what is declared.
   - `.wrap(func)` — a forwarder to `func`, async when `func` is, carrying this signature; `.apply(func)` sets the signature on `func` itself.
-- `add_route_dependency(route, *deps)` — append dependencies to an `APIRoute` or `APIWebSocketRoute` that is already built, and rebuild what FastAPI derived from its dependencies. Call it before the route's router is included elsewhere: an included router keeps its own copy until its routes change.
+- `add_route_dependency(route, *deps)` — append dependencies to an `APIRoute` or `APIWebSocketRoute` that is already built, and rebuild what FastAPI derived from its dependencies. An included router serves its own copy of a route: pass `root=` - the app or router it was included into - and the copy is rebuilt too.
 - `add_lifespan(app_or_router, lifespan)` — run a lifespan inside the one already set, merging the state both yield, for libraries that need a startup step on an app they did not create.
 
 `root` for the dependency helpers is a `Dependant`, a `Depends(...)` marker or a plain callable; `as_dependant` is the conversion they share. A plain callable is read the way FastAPI would, with `Injected` defaults treated as dependencies.
@@ -563,13 +564,13 @@ The root package is what you need to use the library, and the surface a release 
 | Resolving | `inject`, `resolve`, `bind_deps`, `NotNone` |
 | Contexts and overrides | `InjectionContext`, `injection_ctx`, `ContextValue`, `synthetic_request`, `set_default_app`, `push_overrides`, `override_app`, `ValueOverride`, `FactoryOverride` |
 | FastAPI integration | `add_injection` |
-| Errors | `DependencyResolutionError`, `NoInjectionContextError`, `NotADependencyError`, `UnboundContextError`, `UnnamedParamError` |
+| Errors | `InjectedError` - the base of every error below - `DependencyResolutionError`, `NoInjectionContextError`, `NotADependencyError`, `UnboundContextError`, `UnnamedParamError`, `UnsetContextValueError` |
 
 Code that builds on the library imports from the submodule that owns the piece. These are public too:
 
 | Module | Names |
 | --- | --- |
-| `fastapi_injected.ext` | `MakeDataclass`, `MakeInjected`, `signature_with_deps`, `remap_dep_args`, `is_dep`, `is_arg`, `is_request_param`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `unwrap_tp`, `strip_annotation`, `annotated`, `as_depends`, `DependsSource`, `clear_dependant_cache`, `ensure_injection_ctx`, `MissedDependencyError`, `NotAsyncError`, `UnboundDepArgsError` |
+| `fastapi_injected.ext` | `MakeDataclass`, `MakeInjected`, `signature_with_deps`, `remap_dep_args`, `is_dep`, `is_arg`, `is_request_param`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `unwrap_tp`, `strip_annotation`, `annotated`, `is_async_callable`, `as_depends`, `DependsSource`, `clear_dependant_cache`, `ensure_injection_ctx`, `MissedDependencyError`, `NotAsyncError`, `UnboundDepArgsError`, `InvalidMarkerError` |
 | `fastapi_injected.types` | `DepOf`, `ArgMarker`, `HasDependsHook`, and the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro`, `BoundConnection`, `DependencyCache` and friends |
 | `fastapi_injected.overrides` | `Overrides`, `OverridesProvider`, `OverrideBlock` |
 | `fastapi_injected.signature` | `Signature`, `ParamRole` |

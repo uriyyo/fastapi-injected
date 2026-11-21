@@ -16,6 +16,7 @@ from ._openapi import (
 )
 from ._routes import (
     Endpoint,
+    RouteNotFoundError,
     add_lifespan,
     add_route_dependency,
     find_route,
@@ -32,6 +33,7 @@ __all__ = [
     "DependantSource",
     "Endpoint",
     "ParamKind",
+    "RouteNotFoundError",
     "add_lifespan",
     "add_route_dependency",
     "as_dependant",

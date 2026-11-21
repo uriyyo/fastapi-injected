@@ -16,6 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13", "3.14", "3.15"]
+        # the lowest supported version, and the one in uv.lock
+        fastapi-version: ["0.163.0", "locked"]
 
     steps:
       - uses: actions/checkout@v7
@@ -31,9 +33,14 @@ jobs:
         run: |
           uv sync --all-extras --dev
 
+      - name: Pin FastAPI
+        if: matrix.fastapi-version != 'locked'
+        run: |
+          uv pip install "fastapi==${{ matrix.fastapi-version }}"
+
       - name: Unit tests
         run: |
-          uv run pytest tests --cov=fastapi_filters --cov-report=term-missing --cov-report=xml
+          uv run --no-sync pytest tests --cov=fastapi_injected --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

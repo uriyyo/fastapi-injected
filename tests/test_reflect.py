@@ -17,6 +17,7 @@ from fastapi_injected import Arg, Dep, Injected, override_app
 from fastapi_injected.ext import as_depends
 from fastapi_injected.reflect import (
     ParamKind,
+    RouteNotFoundError,
     add_lifespan,
     add_route_dependency,
     as_dependant,
@@ -543,3 +544,56 @@ def test_signature_prepend_rename_returns_and_wrap():
         return 1
 
     assert Signature.of(sync_func).wrap(sync_func)() == 1
+
+
+def test_add_route_dependency_reaches_routes_already_included():
+    seen: list[str] = []
+
+    def guard(token: str) -> None:
+        seen.append(token)
+
+    router = APIRouter()
+
+    @router.get("/x")
+    async def x() -> int:
+        return 1
+
+    @router.websocket("/ws")
+    async def ws(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_text("ok")
+        await websocket.close()
+
+    app = FastAPI()
+    app.include_router(router, prefix="/v1")
+    client = TestClient(app)
+
+    # served once, so FastAPI built the included copies already
+    assert client.get("/v1/x").json() == 1
+
+    for path in ("/x", "/ws"):
+        route = find_route(router, path=path)
+        assert isinstance(route, APIRoute | APIWebSocketRoute)
+        add_route_dependency(route, guard, root=app)
+
+    assert client.get("/v1/x").status_code == 422
+    assert client.get("/v1/x", params={"token": "http"}).json() == 1
+
+    with client.websocket_connect("/v1/ws", params={"token": "ws"}) as websocket:
+        assert websocket.receive_text() == "ok"
+
+    assert seen == ["http", "ws"]
+
+
+def test_add_route_dependency_names_a_root_it_is_not_in():
+    app = FastAPI()
+
+    @app.get("/x")
+    async def x() -> int:
+        return 1  # pragma: no cover
+
+    route = find_route(app, path="/x")
+    assert isinstance(route, APIRoute)
+
+    with pytest.raises(RouteNotFoundError):
+        add_route_dependency(route, endpoint, root=FastAPI())

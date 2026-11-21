@@ -227,7 +227,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.158.0" },
+    { name = "fastapi", specifier = ">=0.163.0" },
     { name = "typing-extensions", specifier = ">=4.16.0" },
     { name = "typing-inspection", specifier = ">=0.4.4" },
 ]

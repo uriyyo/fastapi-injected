@@ -97,7 +97,7 @@ async def test_a_subclass_can_add_its_own_post_init():
     assert await resolve(check) == "readme:admin"
 
 
-def test_a_sync_call_is_refused_when_the_class_is_made():
+async def test_a_sync_call_is_refused_when_the_class_is_made():
     with pytest.raises(NotAsyncError):
 
         class SyncOwner(MakeInjected):

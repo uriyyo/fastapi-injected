@@ -29,12 +29,14 @@ from typing_extensions import sentinel
 from ._body import BODY_CACHE_KEY
 from ._cache import ContextCache, overridden_calls
 from ._dataclass import MakeDataclass
+from ._errors import InjectedError
+from ._fastapi_compat import ASYNC_CLEANUP_SCOPES_KEY, FUNCTION_ASTACK_KEY, INNER_ASTACK_KEY, MIDDLEWARE_ASTACK_KEY
 from ._overrides import Overrides, normalize_overrides
 from ._rlock import RLock
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 
-class UnboundContextError(Exception):
+class UnboundContextError(InjectedError):
     def __init__(self) -> None:
         super().__init__("Injection context is not bound to a request")
 
@@ -310,7 +312,14 @@ class InjectionContext(MakeDataclass):
         )
 
 
-class NoInjectionContextError(LookupError):
+class UnsetContextValueError(InjectedError, LookupError):
+    def __init__(self, name: str, /) -> None:
+        super().__init__(f"{name} is not set in this injection context - set it first, or give it a default")
+
+        self.name = name
+
+
+class NoInjectionContextError(InjectedError, LookupError):
     def __init__(self) -> None:
         super().__init__("no injection context is open")
 
@@ -330,7 +339,7 @@ class ContextValue[T]:
                     return owner.state[self]
 
         if self.default is MISSING:
-            raise LookupError(f"{self.name} is not set")
+            raise UnsetContextValueError(self.name)
 
         return self.default
 
@@ -384,9 +393,9 @@ def _with_stack(
 ) -> BoundConnection:
     # what is built against the returned request is torn down with `stack`
     extra_scope: Scope = {
-        "fastapi_inner_astack": stack,
-        "fastapi_function_astack": stack,
-        "fastapi_async_cleanup_scopes": {
+        INNER_ASTACK_KEY: stack,
+        FUNCTION_ASTACK_KEY: stack,
+        ASYNC_CLEANUP_SCOPES_KEY: {
             stack: stack.enter_context(CancelScope()),
         },
     }
@@ -397,7 +406,7 @@ def _with_stack(
         else _dummy_request(app=app, extra_scope=extra_scope)
     )
 
-    request.scope.setdefault("fastapi_middleware_astack", stack)
+    request.scope.setdefault(MIDDLEWARE_ASTACK_KEY, stack)
 
     return request
 
@@ -522,6 +531,7 @@ __all__ = [
     "NoInjectionContextError",
     "OverrideBlock",
     "UnboundContextError",
+    "UnsetContextValueError",
     "ensure_injection_ctx",
     "injection_ctx",
     "set_default_app",

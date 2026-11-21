@@ -2,14 +2,11 @@ from collections.abc import AsyncGenerator, Callable, Generator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol, cast, runtime_checkable
 
-from fastapi.dependencies.utils import (
-    _get_body_field,
-    get_typed_return_annotation,
-)
+from fastapi.dependencies.utils import get_typed_return_annotation
 from fastapi.routing import (
     APIRoute,
+    APIRouter,
     APIWebSocketRoute,
-    _build_dependant_with_parameterless_dependencies,
     get_websocket_app,
     iter_route_contexts,
     request_response,
@@ -22,6 +19,14 @@ from starlette.types import ASGIApp, Lifespan, Scope
 from starlette.websockets import WebSocket
 
 from fastapi_injected._deps_tp import DependsSource, as_depends, strip_annotation
+from fastapi_injected._errors import InjectedError
+from fastapi_injected._fastapi_compat import (
+    embed_body_fields,
+    mark_routes_changed,
+    mount_app,
+    rebuild_body_field,
+    rebuild_dependant,
+)
 
 
 def response_type(route: APIRoute, /, *, strip: bool = True) -> Any:
@@ -39,7 +44,7 @@ def _websocket_app(route: APIWebSocketRoute, /) -> ASGIApp:
         handler = get_websocket_app(
             dependant=route.dependant,
             dependency_overrides_provider=websocket.scope.get("app"),
-            embed_body_fields=route._embed_body_fields,  # noqa: SLF001
+            embed_body_fields=embed_body_fields(route),
         )
 
         await handler(websocket)
@@ -47,24 +52,40 @@ def _websocket_app(route: APIWebSocketRoute, /) -> ASGIApp:
     return websocket_session(app)
 
 
-def add_route_dependency(route: APIRoute | APIWebSocketRoute, /, *deps: DependsSource) -> None:
+class RouteNotFoundError(InjectedError, LookupError):
+    def __init__(self, route: BaseRoute, /) -> None:
+        super().__init__(f"{route!r} is not a route of the given app or router - pass the one it was included into")
+
+
+def _routes_changed(root: Router | Starlette, route: BaseRoute, /) -> None:
+    for _, router in iter_routers(root):
+        if any(candidate is route for candidate in router.routes):
+            if isinstance(router, APIRouter):
+                mark_routes_changed(router)
+
+            return
+
+    raise RouteNotFoundError(route)
+
+
+def add_route_dependency(
+    route: APIRoute | APIWebSocketRoute,
+    /,
+    *deps: DependsSource,
+    root: Router | Starlette | None = None,
+) -> None:
     route.dependencies.extend(as_depends(dep) for dep in deps)
 
-    route.dependant, body_params, route._embed_body_fields = _build_dependant_with_parameterless_dependencies(  # noqa: SLF001
-        path=route.path_format,
-        call=route.endpoint,
-        dependencies=route.dependencies,
-    )
+    if root is not None:
+        _routes_changed(root, route)
+
+    body_params = rebuild_dependant(route)
 
     if isinstance(route, APIWebSocketRoute):
         route.app = _websocket_app(route)
         return
 
-    route.body_field = _get_body_field(
-        body_params=body_params,
-        name=route.unique_id,
-        embed_body_fields=route._embed_body_fields,  # noqa: SLF001
-    )
+    rebuild_body_field(route, body_params)
     route.app = request_response(route.get_route_handler())
 
 
@@ -233,7 +254,7 @@ def _iter_routers(router: Router, prefix: str = "", /) -> Generator[tuple[str, R
                 sub = original_router
             case Mount():
                 # .app is the middleware stack when the mount has middleware, _base_app is the app itself
-                sub = route._base_app  # noqa: SLF001
+                sub = mount_app(route)
             case Host(app=app):
                 sub = app
             case _:
@@ -272,6 +293,7 @@ def add_lifespan(root: Router | Starlette, lifespan: Lifespan[Any], /) -> None:
 
 __all__ = [
     "Endpoint",
+    "RouteNotFoundError",
     "add_lifespan",
     "add_route_dependency",
     "find_route",

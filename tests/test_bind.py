@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 from typing import Annotated, Any
 
 import pytest
@@ -16,7 +17,7 @@ from fastapi_injected import (
     resolve,
 )
 from fastapi_injected._bind import NotAsyncError, UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
-from fastapi_injected.ext import signature_with_deps
+from fastapi_injected.ext import is_async_callable, signature_with_deps
 
 pytestmark = pytest.mark.asyncio
 
@@ -212,3 +213,26 @@ async def test_an_object_with_an_async_call_is_bound() -> None:
             return await describe(doc, role)
 
     assert await resolve(bind_deps(Describe(), Given(Doc()), RoleDep)) == "readme:admin"
+
+
+async def test_is_async_callable() -> None:
+    async def coro() -> None:
+        pass  # pragma: no cover
+
+    def sync() -> None:
+        pass  # pragma: no cover
+
+    class AsyncCall:
+        async def __call__(self) -> None:
+            pass  # pragma: no cover
+
+    class AsyncClass:
+        async def __call__(self) -> None:
+            pass  # pragma: no cover
+
+    assert is_async_callable(coro)
+    assert is_async_callable(partial(coro))
+    assert is_async_callable(AsyncCall())
+    assert not is_async_callable(sync)
+    # calling the class builds an instance, not a coroutine
+    assert not is_async_callable(AsyncClass)

@@ -6,6 +6,8 @@ from fastapi import Depends, Request, WebSocket, params
 from fastapi.types import DependencyCacheKey
 from typing_extensions import TypeForm, sentinel
 
+from ._errors import InvalidMarkerError
+
 if TYPE_CHECKING:
     Injected: Any = object()
 else:
@@ -38,7 +40,10 @@ else:
                 case (tp, factory):
                     return Annotated[tp, Depends(factory)]
                 case _:
-                    raise TypeError(f"Invalid item: {item}")
+                    raise InvalidMarkerError(
+                        f"DepFactory takes a type and the factory building it, like "
+                        f"`DepFactory[Settings, get_settings]` - got {item!r}",
+                    )
 
 
 type Coro[R] = Coroutine[Any, Any, R]

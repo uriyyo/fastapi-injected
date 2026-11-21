@@ -6,7 +6,7 @@ from typing import Any, cast
 from fastapi import FastAPI, Request, Response, WebSocket, routing
 from fastapi.dependencies import utils
 from fastapi.dependencies.models import Dependant
-from fastapi.dependencies.utils import _solve_generator, get_dependant
+from fastapi.dependencies.utils import get_dependant
 from fastapi.exception_handlers import (
     request_validation_exception_handler,
     websocket_request_validation_exception_handler,
@@ -16,6 +16,8 @@ from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, ExceptionHandler, Message, Receive, Scope, Send
 
 from ._cache import ContextCache
+from ._errors import InjectedError
+from ._fastapi_compat import INNER_ASTACK_KEY, solve_generator
 from .ctx import injection_ctx, set_default_app
 from .deps import DependencyResolutionError
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
@@ -24,11 +26,11 @@ _DEPENDENCY_CACHE_KEY = "__fastapi_injected_dependency_cache__"
 _BOUND_KEY = "__fastapi_injected_bound__"
 
 
-class MissingDependencyCacheError(Exception):
+class MissingDependencyCacheError(InjectedError):
     pass
 
 
-class ConnectionNotAvailableError(Exception):
+class ConnectionNotAvailableError(InjectedError):
     def __init__(self) -> None:
         super().__init__("The connection can not be received from or sent to outside of a route")
 
@@ -64,9 +66,9 @@ def _patched_solve_dependencies(base: Callable[..., Any], /) -> Callable[..., An
 
             # the first solve of a request under `InjectionMiddleware` binds its context to the route's connection
             if request.scope.get(_BOUND_KEY) is False:
-                await _solve_generator(
+                await solve_generator(
                     dependant=_bind_dependant(),
-                    stack=request.scope["fastapi_inner_astack"],
+                    stack=request.scope[INNER_ASTACK_KEY],
                     sub_values={"connection": request},
                     request=request,
                 )
@@ -91,7 +93,9 @@ def _get_dependency_cache(connection: HTTPConnection) -> DependencyCache:
     try:
         return connection.scope[_DEPENDENCY_CACHE_KEY]
     except KeyError:
-        raise MissingDependencyCacheError("Dependency cache not found") from None
+        raise MissingDependencyCacheError(
+            "no dependency cache for this request - call `add_injection(app)`, or add `InjectionMiddleware`",
+        ) from None
 
 
 def _get_overrides_provider(connection: HTTPConnection) -> HasDependencyOverrides | None:

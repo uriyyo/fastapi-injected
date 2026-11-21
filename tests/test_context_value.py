@@ -78,7 +78,7 @@ async def route() -> list[str]:
     return [tenant.get(), await resolve(read_tenant)]
 
 
-def test_a_value_set_by_a_dependency_is_seen_by_the_route():
+async def test_a_value_set_by_a_dependency_is_seen_by_the_route():
     client = TestClient(app)
 
     assert client.get("/", params={"x_tenant": "acme"}).json() == ["acme", "acme"]

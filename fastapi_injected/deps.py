@@ -13,12 +13,13 @@ from pydantic import BaseModel
 from ._body import InvalidBodyError, request_body
 from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation
 from ._deps_tp import is_dep, is_request_param, unwrap_tp
+from ._errors import InjectedError
 from .ctx import InjectionContext
 from .signature import Signature
 from .types import Coro, DependencyCache, HasDependsHook, HasSignature
 
 
-class DependencyResolutionError(ValueError):
+class DependencyResolutionError(InjectedError, ValueError):
     def __init__(self, errors: list[Any], /) -> None:
         super().__init__(errors)
         self.errors = errors
@@ -27,7 +28,7 @@ class DependencyResolutionError(ValueError):
         return RequestValidationError(self.errors)
 
 
-class UnnamedParamError(TypeError):
+class UnnamedParamError(InjectedError, TypeError):
     def __init__(self, param: Any, /) -> None:
         super().__init__(
             f"{type(param).__name__}() resolved on its own or bound with bind_deps has no parameter name "
@@ -38,7 +39,7 @@ class UnnamedParamError(TypeError):
         self.param = param
 
 
-class MissedDependencyError(ValueError):
+class MissedDependencyError(InjectedError, ValueError):
     def __init__(self, name: str, /) -> None:
         super().__init__(f"dependency {name!r} is not available")
         self.name = name

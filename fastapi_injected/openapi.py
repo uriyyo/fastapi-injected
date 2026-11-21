@@ -7,6 +7,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute, iter_route_contexts
 from starlette.routing import BaseRoute
 
+from ._fastapi_compat import routes_version as routes_version_of
 from .reflect import iter_calls
 
 
@@ -82,7 +83,7 @@ class _OpenAPI:
 
     def __call__(self) -> dict[str, Any]:
         # as FastAPI's own `app.openapi()`: routes added since the last build are documented too
-        routes_version = self.app.router._get_routes_version()  # noqa: SLF001
+        routes_version = routes_version_of(self.app.router)
 
         if self.app.openapi_schema is None or self.routes_version != routes_version:
             self.routes_version = routes_version

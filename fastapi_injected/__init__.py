@@ -1,4 +1,5 @@
 from ._bind import bind_deps
+from ._errors import InjectedError
 from ._given import Given
 from ._not_none import NotNone
 from .ctx import (
@@ -6,6 +7,7 @@ from .ctx import (
     InjectionContext,
     NoInjectionContextError,
     UnboundContextError,
+    UnsetContextValueError,
     injection_ctx,
     set_default_app,
     synthetic_request,
@@ -27,12 +29,14 @@ __all__ = [
     "FactoryOverride",
     "Given",
     "Injected",
+    "InjectedError",
     "InjectionContext",
     "NoInjectionContextError",
     "NotADependencyError",
     "NotNone",
     "UnboundContextError",
     "UnnamedParamError",
+    "UnsetContextValueError",
     "ValueOverride",
     "add_injection",
     "bind_deps",

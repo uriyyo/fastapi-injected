@@ -8,6 +8,7 @@ from fastapi import params
 from fastapi.params import Body, Depends, Param
 from typing_inspection.typing_objects import is_typealiastype
 
+from ._errors import InvalidMarkerError
 from .types import ArgMarker, HasDependsHook
 
 
@@ -62,8 +63,8 @@ def _enforce_dep(tp: Any) -> Any:
     tp = unwrap_tp(tp)
 
     if not is_dep(tp):
-        msg = f"Expected a Dep, got {tp!r}"
-        raise TypeError(msg)
+        msg = f"expected a `Dep[...]` or `DepFactory[...]` annotation, got {tp!r}"
+        raise InvalidMarkerError(msg)
 
     return tp
 

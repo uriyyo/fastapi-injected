@@ -10,10 +10,11 @@ from fastapi.dependencies.utils import get_typed_annotation, get_typed_signature
 from typing_inspection.typing_objects import is_typealiastype
 
 from ._deps_tp import DependsSource, as_depends, is_arg, is_dep, is_request_param, unwrap_tp
+from ._errors import InjectedError
 from .types import Func, HasSignature, Injected
 
 
-class NotADependencyError(TypeError):
+class NotADependencyError(InjectedError, TypeError):
     def __init__(self, name: str, /) -> None:
         super().__init__(
             f"parameter {name!r} defaults to Injected but is not a dependency - "
