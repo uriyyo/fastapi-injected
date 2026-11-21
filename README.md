@@ -459,7 +459,7 @@ assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
 
 ### Adding to the OpenAPI schema
 
-`fastapi_injected.openapi` gives libraries one shared `app.openapi` to add to, instead of each replacing it. The schema is cached in `app.openapi_schema` until `invalidate_openapi(app)`.
+`fastapi_injected.openapi` gives libraries one shared `app.openapi` to add to, instead of each replacing it. The schema is cached in `app.openapi_schema` and built again when routes change, or after `invalidate_openapi(app)`.
 
 - `add_openapi_hook(app, hook)` — `hook(app, schema)` post-processes the schema, in the order hooks were added; it changes `schema` in place or returns a new one.
 - `__doc_depends__(methods)` — dependencies a call resolves itself, documented for every route that has it anywhere in its dependency tree (`HasDocDepends`, `iter_doc_depends(route)`). `add_openapi(app)` enables it without a hook.

@@ -78,9 +78,14 @@ class _OpenAPI:
     app: FastAPI
     custom: Callable[[], dict[str, Any]] | None = None
     hooks: list[OpenAPIHook] = field(default_factory=list)
+    routes_version: int | None = None
 
     def __call__(self) -> dict[str, Any]:
-        if self.app.openapi_schema is None:
+        # as FastAPI's own `app.openapi()`: routes added since the last build are documented too
+        routes_version = self.app.router._get_routes_version()  # noqa: SLF001
+
+        if self.app.openapi_schema is None or self.routes_version != routes_version:
+            self.routes_version = routes_version
             schema = self.custom() if self.custom is not None else _build_openapi(self.app)
 
             for hook in self.hooks:

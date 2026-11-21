@@ -131,3 +131,19 @@ def test_docs_are_served_from_the_schema() -> None:
     add_openapi_hook(app, lambda _, schema: {**schema, "x-hooked": True})
 
     assert TestClient(app).get("/openapi.json").json()["x-hooked"] is True
+
+
+def test_routes_added_later_are_documented() -> None:
+    app = FastAPI()
+    add_openapi_hook(app, lambda _, schema: {**schema, "x-hooked": True})
+
+    assert app.openapi()["paths"] == {}
+
+    @app.get("/later")
+    async def later() -> None:
+        pass
+
+    schema = app.openapi()
+
+    assert "/later" in schema["paths"]
+    assert schema["x-hooked"] is True
