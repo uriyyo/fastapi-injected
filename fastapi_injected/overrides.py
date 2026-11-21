@@ -5,7 +5,7 @@ from typing import Any, Protocol
 
 from ._dataclass import MakeDataclass
 from ._overrides import FactoryOverride, Overrides, ValueOverride, normalize_overrides
-from .ctx import InjectionContext
+from .ctx import InjectionContext, OverrideBlock
 from .types import HasDependencyOverrides
 
 
@@ -13,17 +13,15 @@ class OverridesProvider(MakeDataclass):
     dependency_overrides: Mapping[Any, Any] = field(default_factory=dict)
 
 
-@contextmanager
 def push_overrides(
     overrides: Overrides | None = None,
     /,
     *,
     provider: HasDependencyOverrides | None = None,
-) -> Generator[InjectionContext]:
+) -> OverrideBlock[InjectionContext]:
     ctx = InjectionContext.current() or InjectionContext()
 
-    with ctx.override(overrides, provider=provider) as child:
-        yield child
+    return ctx.override(overrides, provider=provider)
 
 
 class HasMutableOverrides(Protocol):

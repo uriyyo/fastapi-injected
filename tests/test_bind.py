@@ -2,10 +2,19 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
-from fastapi import Depends, FastAPI, Header
+from fastapi import Cookie, Depends, FastAPI, Header, Path, Query
 from fastapi.testclient import TestClient
 
-from fastapi_injected import Given, add_injection, bind_deps, inject, injection_ctx, push_overrides, resolve
+from fastapi_injected import (
+    Given,
+    UnnamedParamError,
+    add_injection,
+    bind_deps,
+    inject,
+    injection_ctx,
+    push_overrides,
+    resolve,
+)
 from fastapi_injected._bind import UnboundDepArgsError, dep_arg_name, remap_dep_args, take_dep_args
 from fastapi_injected.ext import signature_with_deps
 
@@ -112,6 +121,38 @@ async def test_a_request_marker_resolves_from_the_request() -> None:
 
     with TestClient(app) as client:
         assert client.get("/marker", headers={"x-title": "readme"}).json() == "readme:admin"
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        Annotated[int, Path()],
+        Annotated[int, Query()],
+        Annotated[str, Header()],
+        Annotated[str, Cookie()],
+    ],
+)
+async def test_a_request_marker_without_an_alias_cannot_be_bound(marker) -> None:
+    # it would be read under `__dep_arg_0`, which no request carries
+    with pytest.raises(UnnamedParamError, match="alias"):
+        signature_with_deps(titled, marker)
+
+
+async def test_an_aliased_path_marker_resolves_from_the_path() -> None:
+    app = FastAPI()
+    add_injection(app)
+
+    async def echo(item_id: int) -> int:
+        return item_id
+
+    @app.get("/items/{item_id}")
+    async def _route(
+        item: Annotated[int, Depends(bind_deps(echo, Annotated[int, Path(alias="item_id")]))],
+    ) -> int:
+        return item
+
+    with TestClient(app) as client:
+        assert client.get("/items/7").json() == 7
 
 
 async def test_signature_with_deps_names_the_bound_parameters() -> None:

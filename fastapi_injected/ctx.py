@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from collections import ChainMap
 from collections.abc import AsyncGenerator, Generator, Iterator, Mapping, MutableMapping, Sequence
@@ -8,7 +10,8 @@ from contextlib import (
     contextmanager,
 )
 from contextvars import ContextVar
-from dataclasses import field, replace
+from dataclasses import dataclass, field, replace
+from types import TracebackType
 from typing import Any, Self, cast
 from urllib.parse import urlencode
 
@@ -292,8 +295,8 @@ class InjectionContext(MakeDataclass):
         /,
         *,
         provider: HasDependencyOverrides | None = None,
-    ) -> AbstractContextManager[Self]:
-        return _enter_ctx(
+    ) -> OverrideBlock[Self]:
+        return OverrideBlock(
             replace(
                 self,
                 parent=self,
@@ -320,6 +323,89 @@ def _enter_ctx[S: InjectionContext](ctx: S, /) -> Generator[S]:
         _injection_ctx.reset(token)
 
 
+def _scope_app(request: BoundConnection | None, /) -> HasDependencyOverrides | None:
+    match request.scope.get("app") if request is not None else None:
+        case HasDependencyOverrides() as app:
+            return app
+        case _:
+            return None
+
+
+def _with_stack(
+    request: BoundConnection | None,
+    stack: AsyncExitStack,
+    /,
+    *,
+    app: FastAPI | None = None,
+) -> BoundConnection:
+    # what is built against the returned request is torn down with `stack`
+    extra_scope: Scope = {
+        "fastapi_inner_astack": stack,
+        "fastapi_function_astack": stack,
+        "fastapi_async_cleanup_scopes": {
+            stack: stack.enter_context(CancelScope()),
+        },
+    }
+
+    request = (
+        _rebind_request(request, extra_scope=extra_scope)
+        if request is not None
+        else _dummy_request(app=app, extra_scope=extra_scope)
+    )
+
+    request.scope.setdefault("fastapi_middleware_astack", stack)
+
+    return request
+
+
+@dataclass
+class OverrideBlock[S: InjectionContext]:
+    ctx: S
+
+    _entered: AbstractContextManager[S] | None = field(default=None, init=False)
+    _stack: AsyncExitStack | None = field(default=None, init=False)
+
+    def __init__(self, ctx: S, /) -> None:
+        self.ctx = ctx
+
+    def __enter__(self) -> S:
+        self._entered = _enter_ctx(self.ctx)
+        return self._entered.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+        /,
+    ) -> None:
+        if self._entered is not None:
+            self._entered.__exit__(exc_type, exc, tb)
+
+    async def __aenter__(self) -> S:
+        self._stack = stack = AsyncExitStack()
+        await stack.__aenter__()
+
+        try:
+            ctx = replace(self.ctx, request=_with_stack(self.ctx.request, stack))
+            return stack.enter_context(_enter_ctx(ctx))
+        except BaseException as exc:
+            await stack.__aexit__(type(exc), exc, exc.__traceback__)
+            raise
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+        /,
+    ) -> bool | None:
+        if self._stack is not None:
+            return await self._stack.__aexit__(exc_type, exc, tb)
+
+        return None
+
+
 @asynccontextmanager
 async def injection_ctx(
     overrides: Overrides | None = None,
@@ -335,26 +421,18 @@ async def injection_ctx(
 
     parent = InjectionContext.current()
 
+    # the app a context is told about overrides like the app of a route would; one only
+    # inherited from the parent already reaches it through the parent's overrides
+    if provider is None:
+        provider = cast("HasDependencyOverrides", app) if app is not None else _scope_app(request)
+
     # a context of its own is about building dependencies again, not about leaving the
     # request they are built for
     if request is None and parent is not None:
         request = parent.request
 
     async with AsyncExitStack() as stack:
-        extra_scope: Scope = {
-            "fastapi_inner_astack": stack,
-            "fastapi_function_astack": stack,
-            # entered here, not by fastapi inside a task group
-            "fastapi_async_cleanup_scopes": {stack: stack.enter_context(CancelScope())},
-        }
-
-        request = (
-            _rebind_request(request, extra_scope=extra_scope)
-            if request is not None
-            else _dummy_request(app=app, extra_scope=extra_scope)
-        )
-
-        request.scope.setdefault("fastapi_middleware_astack", stack)
+        request = _with_stack(request, stack, app=app)
 
         ctx = InjectionContext(
             dependency_cache,
@@ -385,6 +463,7 @@ async def ensure_injection_ctx(
 
 __all__ = [
     "InjectionContext",
+    "OverrideBlock",
     "UnboundContextError",
     "ensure_injection_ctx",
     "injection_ctx",

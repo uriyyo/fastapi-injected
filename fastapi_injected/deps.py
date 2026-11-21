@@ -30,7 +30,8 @@ class DependencyResolutionError(ValueError):
 class UnnamedParamError(TypeError):
     def __init__(self, param: Any, /) -> None:
         super().__init__(
-            f"{type(param).__name__}() resolved on its own has no parameter name to read from the request - "
+            f"{type(param).__name__}() resolved on its own or bound with bind_deps has no parameter name "
+            f"to read from the request - "
             f"give it an alias, like {type(param).__name__}(alias='x-api-key')",
         )
 

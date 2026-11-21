@@ -3,8 +3,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 
-from fastapi_injected import ValueOverride, injection_ctx, push_overrides, resolve
+from fastapi_injected import ValueOverride, injection_ctx, push_overrides, resolve, synthetic_request
 
 from .deps import Child, Container, ContextState, ctx_dep
 
@@ -126,3 +127,74 @@ async def test_callable_override_is_called() -> None:
 
     with push_overrides({Child: fake}):
         assert await resolve(Child) == "fake"
+
+
+async def test_async_push_overrides_tears_down_at_block_exit() -> None:
+    async with injection_ctx():
+        async with push_overrides({Child: ValueOverride(Child())}):
+            inside = await resolve(Container)
+
+            assert not inside.ctx.closed
+
+        assert inside.ctx.closed
+
+
+async def test_async_push_overrides_caches_inside_the_block_without_a_context() -> None:
+    async with push_overrides({Child: ValueOverride(Child())}):
+        first = await resolve(Container)
+        second = await resolve(Container)
+
+        assert first is second
+        assert not first.ctx.closed
+
+    assert first.ctx.closed
+
+
+async def test_async_push_overrides_keeps_the_surrounding_cache() -> None:
+    async with injection_ctx():
+        before = await resolve(Container)
+
+        async with push_overrides({Child: ValueOverride(Child())}):
+            assert (await resolve(ctx_dep)) is before.ctx
+
+        assert (await resolve(Container)) is before
+        assert not before.ctx.closed
+
+
+async def test_sync_push_overrides_still_tears_down_with_the_surrounding_context() -> None:
+    async with injection_ctx():
+        with push_overrides({Child: ValueOverride(Child())}):
+            inside = await resolve(Container)
+
+        assert not inside.ctx.closed
+
+    assert inside.ctx.closed
+
+
+async def test_the_app_given_to_a_context_overrides_like_a_route() -> None:
+    child = Child()
+    app = FastAPI()
+    app.dependency_overrides[Child] = _child_factory(child)
+
+    async with injection_ctx(app=app):
+        assert (await resolve(Container)).child is child
+
+    assert (await resolve(Container)).child is not child
+
+
+async def test_the_app_of_a_given_request_overrides_like_a_route() -> None:
+    child = Child()
+    app = FastAPI()
+    app.dependency_overrides[Child] = _child_factory(child)
+
+    async with injection_ctx(request=synthetic_request(app=app)):
+        assert (await resolve(Container)).child is child
+
+
+async def test_explicit_overrides_win_over_the_app() -> None:
+    from_app, explicit = Child(), Child()
+    app = FastAPI()
+    app.dependency_overrides[Child] = _child_factory(from_app)
+
+    async with injection_ctx({Child: ValueOverride(explicit)}, app=app):
+        assert (await resolve(Container)).child is explicit
