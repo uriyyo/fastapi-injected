@@ -9,7 +9,7 @@ from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ._cache import ContextCache
-from .ctx import injection_ctx
+from .ctx import injection_ctx, set_default_app
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
 
 _DEPENDENCY_CACHE_KEY = "__fastapi_injected_dependency_cache__"
@@ -140,6 +140,8 @@ def add_injection(
     app: FastAPI,
     /,
 ) -> None:
+    set_default_app(app)
+
     if not _is_build_middleware_stack_patched(app):
         _wrap_build_middleware_stack(app)
 

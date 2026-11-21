@@ -1,6 +1,7 @@
 from ._bind import bind_deps
 from ._given import Given
-from .ctx import InjectionContext, UnboundContextError, injection_ctx, synthetic_request
+from ._not_none import NotNone
+from .ctx import InjectionContext, UnboundContextError, injection_ctx, set_default_app, synthetic_request
 from .deps import DependencyResolutionError, UnnamedParamError
 from .fastapi import add_injection
 from .inject import inject
@@ -19,6 +20,7 @@ __all__ = [
     "Injected",
     "InjectionContext",
     "NotADependencyError",
+    "NotNone",
     "UnboundContextError",
     "UnnamedParamError",
     "ValueOverride",
@@ -29,5 +31,6 @@ __all__ = [
     "override_app",
     "push_overrides",
     "resolve",
+    "set_default_app",
     "synthetic_request",
 ]

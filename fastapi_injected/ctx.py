@@ -9,7 +9,7 @@ from contextlib import (
     asynccontextmanager,
     contextmanager,
 )
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field, replace
 from types import TracebackType
 from typing import Any, Self, cast
@@ -307,20 +307,30 @@ class InjectionContext(MakeDataclass):
         )
 
 
+@contextmanager
+def _reset_on_exit[T](var: ContextVar[T], token: Token[T], value: T, /) -> Generator[T]:
+    try:
+        yield value
+    finally:
+        var.reset(token)
+
+
+def set_var[T](var: ContextVar[T], value: T, /) -> AbstractContextManager[T]:
+    # set right away; `with` also puts the previous value back
+    return _reset_on_exit(var, var.set(value), value)
+
+
 _injection_ctx: ContextVar[InjectionContext | None] = ContextVar(
     "_injection_ctx",
     default=None,
 )
 
 
-@contextmanager
-def _enter_ctx[S: InjectionContext](ctx: S, /) -> Generator[S]:
-    token = _injection_ctx.set(ctx)
+_default_app: ContextVar[FastAPI | None] = ContextVar("_default_app", default=None)
 
-    try:
-        yield ctx
-    finally:
-        _injection_ctx.reset(token)
+
+def set_default_app(app: FastAPI | None, /) -> AbstractContextManager[FastAPI | None]:
+    return set_var(_default_app, app)
 
 
 def _scope_app(request: BoundConnection | None, /) -> HasDependencyOverrides | None:
@@ -362,15 +372,17 @@ def _with_stack(
 class OverrideBlock[S: InjectionContext]:
     ctx: S
 
-    _entered: AbstractContextManager[S] | None = field(default=None, init=False)
+    _entered: AbstractContextManager[InjectionContext | None] | None = field(default=None, init=False)
     _stack: AsyncExitStack | None = field(default=None, init=False)
 
     def __init__(self, ctx: S, /) -> None:
         self.ctx = ctx
 
     def __enter__(self) -> S:
-        self._entered = _enter_ctx(self.ctx)
-        return self._entered.__enter__()
+        self._entered = set_var(_injection_ctx, self.ctx)
+        self._entered.__enter__()
+
+        return self.ctx
 
     def __exit__(
         self,
@@ -388,10 +400,12 @@ class OverrideBlock[S: InjectionContext]:
 
         try:
             ctx = replace(self.ctx, request=_with_stack(self.ctx.request, stack))
-            return stack.enter_context(_enter_ctx(ctx))
+            stack.enter_context(set_var(_injection_ctx, ctx))
         except BaseException as exc:
             await stack.__aexit__(type(exc), exc, exc.__traceback__)
             raise
+
+        return ctx
 
     async def __aexit__(
         self,
@@ -431,6 +445,13 @@ async def injection_ctx(
     if request is None and parent is not None:
         request = parent.request
 
+    # no request to take the app from, so the default one stands in
+    if request is None and app is None:
+        app = _default_app.get()
+
+        if provider is None:
+            provider = cast("HasDependencyOverrides | None", app)
+
     async with AsyncExitStack() as stack:
         request = _with_stack(request, stack, app=app)
 
@@ -441,7 +462,7 @@ async def injection_ctx(
             own_overrides=normalize_overrides(overrides, provider=provider),
         )
 
-        with _enter_ctx(ctx):
+        with set_var(_injection_ctx, ctx):
             yield ctx
 
 
@@ -467,5 +488,6 @@ __all__ = [
     "UnboundContextError",
     "ensure_injection_ctx",
     "injection_ctx",
+    "set_default_app",
     "synthetic_request",
 ]
