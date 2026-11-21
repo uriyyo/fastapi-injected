@@ -7,6 +7,7 @@ from fastapi.params import Depends
 
 from ._calls import annotated
 from ._deps_tp import unwrap_tp
+from .deps import _named_param
 from .signature import Signature
 from .types import AsyncFunc, DepOf, Func
 
@@ -41,7 +42,12 @@ def _dep_annotation(dep: DepOf[Any] | Callable[..., Any], /) -> Any:
     if isinstance(dep, Depends):
         return annotated(Any, dep)
 
-    if _is_annotation(dep) or not callable(dep):
+    if _is_annotation(dep):
+        # bound, a marker is read under the made-up `__dep_arg_N` name, so it must name its own
+        _named_param(unwrap_tp(dep))
+        return dep
+
+    if not callable(dep):
         return dep
 
     return annotated(Any, Depends(dep))

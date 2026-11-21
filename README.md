@@ -200,7 +200,22 @@ with push_overrides(
 
 Overrides apply to the whole graph, not just top-level parameters — overriding a nested dependency changes what its dependents receive. Nested `push_overrides` blocks merge, with the innermost one winning.
 
-An override block is a context of its own: it caches what it builds, and that cache goes away with the block. The surrounding context keeps what it had resolved before, and it stays visible — except for the overridden dependencies and anything built from them, which are resolved again under the override:
+An override block is a context of its own: it caches what it builds, and that cache goes away with the block. The surrounding context keeps what it had resolved before, and it stays visible — except for the overridden dependencies and anything built from them, which are resolved again under the override.
+
+Enter the block with `async with` for what it builds to be torn down when the block ends. A plain `with` cannot run async teardown, so generator dependencies first built inside it are torn down with the surrounding context instead:
+
+```python
+async with injection_ctx():
+    async with push_overrides({Session: fake}):
+        await handler()  # a generator dependency built here...
+    # ...is torn down here
+
+    with push_overrides({Session: fake}):
+        await handler()
+    # still open - torn down when `injection_ctx()` ends
+```
+
+Reuse of the surrounding cache works the same either way:
 
 ```python
 async with injection_ctx():
@@ -223,6 +238,8 @@ async with injection_ctx({Session: fake}) as ctx:
 ```
 
 For FastAPI's own `app.dependency_overrides`, `override_app(app, {dep: fake})` sets entries for a `with` block and restores the previous mapping afterwards, including entries added inside the block.
+
+A route reads `app.dependency_overrides` on its own. Outside a request, a context only knows the application it is given: `injection_ctx(app=app)`, or a `request=` whose scope carries one, applies that app's overrides the way a route would, beneath the overrides passed to the context itself. A context given neither cannot know which app's overrides are meant, so it applies none.
 
 ### Dependencies that are objects
 
@@ -300,6 +317,8 @@ await resolve(bound)  # "readme:admin", with `role` resolved as usual
 What a parameter is bound to can be written any way a dependency can be: a marker like `Given(...)`, `Dep[T]` or `DepFactory[T, factory]`, a `Depends(...)`, or the callable itself — the same things `resolve` accepts.
 
 Binding takes the parameters away, and a type checker sees what is left: `bind_deps(describe, Given(doc))` is a function of `(role)`, and binding both leaves one of no arguments at all. The bound function is a dependency like any other — resolve it, `@inject` it, override what it depends on. Binding more markers than the function has parameters is a `TypeError` rather than a silent truncation.
+
+A request marker is bound under a made-up parameter name, so it has to say what it reads: `Annotated[int, Path(alias="item_id")]` binds, while a bare `Path()`, `Query()`, `Header()` or `Cookie()` raises `UnnamedParamError` instead of reading a parameter no request carries.
 
 ### Dependencies as objects
 
