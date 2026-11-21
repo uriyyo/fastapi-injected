@@ -141,7 +141,7 @@ async with injection_ctx(app=app):
     await handler()  # `request.app.state` resolves as it does in a route
 ```
 
-Without it, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
+Without it, the context falls back to the default app — the last one given to `add_injection` (see [FastAPI request integration](#fastapi-request-integration)). With neither, reading `request.app` raises a `KeyError` naming what is missing rather than a bare `'app'`.
 
 When a dependency reads more of the request than that — a header, a cookie, a query or path parameter, the body — describe the request with `synthetic_request` and hand it to the context:
 
@@ -239,7 +239,7 @@ async with injection_ctx({Session: fake}) as ctx:
 
 For FastAPI's own `app.dependency_overrides`, `override_app(app, {dep: fake})` sets entries for a `with` block and restores the previous mapping afterwards, including entries added inside the block.
 
-A route reads `app.dependency_overrides` on its own. Outside a request, a context only knows the application it is given: `injection_ctx(app=app)`, or a `request=` whose scope carries one, applies that app's overrides the way a route would, beneath the overrides passed to the context itself. A context given neither cannot know which app's overrides are meant, so it applies none.
+A route reads `app.dependency_overrides` on its own. Outside a request, a context only knows the application it is given: `injection_ctx(app=app)`, or a `request=` whose scope carries one, applies that app's overrides the way a route would, beneath the overrides passed to the context itself. A context given neither uses the default app, the last one given to `add_injection`, and applies none when there is no default.
 
 ### Dependencies that are objects
 
@@ -285,6 +285,28 @@ except DependencyResolutionError as exc:
 ```
 
 It is a `ValueError`, which is what resolution used to raise, so code catching that keeps working.
+
+### Values that must be there
+
+A dependency that loads something often returns `None` when it is missing. `NotNone[T, dep]` is what `dep` resolves to, or a 404 when that is `None`, and a type checker sees it as plain `T`:
+
+```python
+from typing import Annotated
+from fastapi import Depends
+from fastapi_injected import NotNone
+
+type MaybeUserDep = Annotated[User | None, Depends(load_user)]
+type UserDep = NotNone[User, MaybeUserDep]
+
+
+@app.get("/users/{user_id}")
+async def get_user(user: UserDep) -> User:
+    return user  # never None here
+```
+
+A third item chooses the error: anything called with no arguments that returns an exception, such as an exception class — `NotNone[User, MaybeUserDep, UserGone]`.
+
+`NotNone` reads the same dependency it wraps, so a handler can ask for `UserDep` and `MaybeUserDep` side by side and the user is still loaded once per request. A dependency made at runtime, like `Given(...)`, works too, and is not kept once its resolve is done.
 
 ### Dependencies decided at runtime
 
@@ -411,6 +433,19 @@ async def route(service: Dep[Service]) -> str:
     ...
 ```
 
+`add_injection` also makes `app` the default app: a context opened without a request — a background job, a bot handler, a script — resolves against it, so `request.app` is that app and its `dependency_overrides` apply, as they would in a route. The last app given to `add_injection` wins. `set_default_app` sets it directly, and used with `with` puts the previous one back when the block ends:
+
+```python
+from fastapi_injected import set_default_app
+
+set_default_app(worker_app)  # for the rest of the process
+
+with set_default_app(test_app):  # only inside the block
+    await job()
+```
+
+The default lives in a context variable, so it reaches the tasks started after it is set: set it at startup, not inside a task that other tasks will not see.
+
 Anything called from the handler — including `@inject`-ed helpers — resolves against the request's cache, so a per-request dependency like a DB session stays a single instance for the whole request. The context is opened by a middleware, so `resolve` also works inside middleware added before it (before routing, `request.scope["route"]` and path params are not available yet).
 
 WebSocket routes work the same way: the context is bound to the `WebSocket` instead of a `Request`, and dependencies that ask for one get it. A websocket handed to a dependency shares its handshake with the one the route received, so it can be talked through after the route has called `accept()`:
@@ -468,8 +503,8 @@ The root package is what you need to use the library, and the surface a release 
 | | |
 | --- | --- |
 | Markers | `Dep`, `DepFactory`, `Arg`, `Given`, `Injected` |
-| Resolving | `inject`, `resolve`, `bind_deps` |
-| Contexts and overrides | `InjectionContext`, `injection_ctx`, `synthetic_request`, `push_overrides`, `override_app`, `ValueOverride`, `FactoryOverride` |
+| Resolving | `inject`, `resolve`, `bind_deps`, `NotNone` |
+| Contexts and overrides | `InjectionContext`, `injection_ctx`, `synthetic_request`, `set_default_app`, `push_overrides`, `override_app`, `ValueOverride`, `FactoryOverride` |
 | FastAPI integration | `add_injection` |
 | Errors | `DependencyResolutionError`, `NotADependencyError`, `UnboundContextError`, `UnnamedParamError` |
 
