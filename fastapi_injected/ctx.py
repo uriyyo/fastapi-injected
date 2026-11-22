@@ -514,14 +514,13 @@ async def ensure_injection_ctx(
     *,
     new_ctx: bool = False,
 ) -> AsyncGenerator[InjectionContext]:
-    ctx = InjectionContext.current()
+    # a context that carries only overrides has no request to resolve against,
+    # so resolution happens in a context of its own that inherits them
+    if (ctx := InjectionContext.current()) is not None and ctx.bound and not new_ctx:
+        yield ctx
+        return
 
-    async with AsyncExitStack() as stack:
-        # a context that carries only overrides has no request to resolve against,
-        # so resolution happens in a context of its own that inherits them
-        if ctx is None or new_ctx or not ctx.bound:
-            ctx = await stack.enter_async_context(injection_ctx())
-
+    async with injection_ctx() as ctx:
         yield ctx
 
 

@@ -4,19 +4,19 @@ from contextlib import AsyncExitStack, contextmanager
 from functools import lru_cache
 from typing import Any, cast, get_args
 
-from fastapi import Depends, params
+from fastapi import params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant, solve_dependencies
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 
 from ._body import InvalidBodyError, request_body
-from ._calls import CallProxy, DetachedOverrides, annotated, is_static_annotation
-from ._deps_tp import is_dep, is_request_param, unwrap_tp
+from ._calls import is_static_annotation, runtime_calls
+from ._deps_tp import as_annotation, is_dep, is_request_param, unwrap_tp
 from ._errors import InjectedError
 from .ctx import InjectionContext
 from .signature import Signature
-from .types import Coro, DependencyCache, HasDependsHook, HasSignature
+from .types import Coro, DependencyCache, HasDependsHook
 
 
 class DependencyResolutionError(InjectedError, ValueError):
@@ -48,7 +48,7 @@ class MissedDependencyError(InjectedError, ValueError):
 def create_dependant[**P, R](func: Callable[P, Coro[R]], /) -> Dependant:
     return get_dependant(
         path="",
-        call=Signature.of(func).prepare().wrap(func),
+        call=Signature.of(func).deps_only().wrap(func),
     )
 
 
@@ -65,21 +65,18 @@ def open_dependant[**P, R](
         case _ if is_request_param(tp):
             annotation = _named_param(unwrap_tp(tp))
         case params.Param() | params.Body():
-            annotation = _named_param(annotated(Any, tp))
-        case HasDependsHook():
-            annotation = annotated(Any, tp.__get_depends__())
+            annotation = _named_param(as_annotation(tp))
         case _:
-            annotation = annotated(Any, Depends(tp))
+            annotation = as_annotation(tp)
 
     if is_static_annotation(annotation):
         yield _create_annotation_dependant(annotation, path=path)
         return
 
-    # a dependency made at runtime is analysed again on every resolve, and FastAPI only
-    # ever sees its calls behind proxies released here - caching either would keep
+    # a dependency made at runtime is analysed again on every resolve - caching it would keep
     # whatever it carries alive past the request
-    with CallProxy(_value_factory(annotation)) as call:
-        yield get_dependant(path=path or "", call=call)
+    with runtime_calls():
+        yield get_dependant(path=path or "", call=_value_factory(annotation))
 
 
 def _named_param(annotation: Any, /) -> Any:
@@ -108,18 +105,7 @@ def _value_factory(annotation: Any, /) -> Callable[..., Coro[Any]]:
     async def _factory(__value__: Any) -> Any:
         return __value__
 
-    cast(HasSignature, _factory).__signature__ = inspect.Signature(
-        parameters=[
-            inspect.Parameter(
-                "__value__",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=annotation,
-            ),
-        ],
-        return_annotation=Any,
-    )
-
-    return _factory
+    return Signature.build(__value__=annotation).apply(_factory)
 
 
 @lru_cache(maxsize=1024)
@@ -142,12 +128,13 @@ async def solve_arguments(
         async with ctx.lock:
             body, embed_body_fields = await request_body(ctx.bound_request, dependant)
 
-            with DetachedOverrides(ctx.dependency_overrides) as overrides:
+            with runtime_calls():
                 solved = await solve_dependencies(
                     request=ctx.bound_request,
                     dependant=dependant,
                     dependency_cache=cast(DependencyCache, ctx.cache_for(dependant)),
-                    dependency_overrides_provider=overrides,
+                    # FastAPI reads the overrides off the provider it is given
+                    dependency_overrides_provider=ctx,
                     # this parameter is deprecated and not used
                     async_exit_stack=cast(AsyncExitStack, None),
                     body=body,

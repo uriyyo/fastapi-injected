@@ -19,7 +19,6 @@ from fastapi_injected import (
 )
 from fastapi_injected.ext import InvalidMarkerError, MissedDependencyError, NotAsyncError, UnboundDepArgsError
 from fastapi_injected.fastapi import ConnectionNotAvailableError, MissingDependencyCacheError
-from fastapi_injected.reflect import RouteNotFoundError
 
 pytestmark = pytest.mark.asyncio
 
@@ -87,7 +86,6 @@ async def test_every_error_is_an_injected_error():
         InvalidMarkerError,
         MissingDependencyCacheError,
         ConnectionNotAvailableError,
-        RouteNotFoundError,
     ]
 
     assert all(issubclass(error, InjectedError) for error in errors)

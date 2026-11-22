@@ -48,7 +48,7 @@ def inject[**P, R](
             return await func(*args, **kwargs)
 
     # plain inspect.signature: the wrapper's globals cannot resolve the function's string annotations
-    return Signature.of(inspect.signature(wrapper)).strip(dependant).apply(wrapper)
+    return Signature.of(inspect.signature(wrapper)).without_deps(dependant).apply(wrapper)
 
 
 __all__ = [

@@ -13,7 +13,7 @@ from fastapi_injected.openapi import (
     invalidate_openapi,
     iter_doc_depends,
 )
-from fastapi_injected.reflect import find_route, operation_for
+from fastapi_injected.walk import iter_endpoints
 
 
 async def _tenant(x_tenant: Annotated[str, Header()]) -> str:
@@ -31,7 +31,7 @@ class LazyTenant(MakeDataclass):
 
 
 def _params(app: FastAPI, method: str, path: str) -> list[str]:
-    return [param["name"] for param in operation_for(app, method, path).get("parameters", [])]
+    return [param["name"] for param in app.openapi()["paths"][path][method.lower()].get("parameters", [])]
 
 
 def test_lazy_dependency_is_a_doc_depends() -> None:
@@ -81,7 +81,7 @@ def test_equal_doc_depends_are_documented_once() -> None:
     async def twice() -> None:
         pass
 
-    route = find_route(app, path="/twice")
+    route = next(route for path, route in iter_endpoints(app) if path == "/twice")
 
     assert len([*iter_doc_depends(route)]) == 1
 

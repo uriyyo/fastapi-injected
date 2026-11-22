@@ -1,7 +1,8 @@
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import cache, wraps
-from typing import Any, cast
+from typing import Any, Protocol, cast, runtime_checkable
 
 from fastapi import FastAPI, Request, Response, WebSocket, routing
 from fastapi.dependencies import utils
@@ -12,12 +13,14 @@ from fastapi.exception_handlers import (
     websocket_request_validation_exception_handler,
 )
 from fastapi.exceptions import WebSocketRequestValidationError
+from starlette.applications import Starlette
 from starlette.requests import HTTPConnection
-from starlette.types import ASGIApp, ExceptionHandler, Message, Receive, Scope, Send
+from starlette.routing import Router
+from starlette.types import ASGIApp, ExceptionHandler, Lifespan, Message, Receive, Scope, Send
 
 from ._cache import ContextCache
 from ._errors import InjectedError
-from ._fastapi_compat import INNER_ASTACK_KEY, solve_generator
+from ._fastapi_compat import INNER_ASTACK_KEY, patch_fastapi, solve_generator
 from .ctx import injection_ctx, set_default_app
 from .deps import DependencyResolutionError
 from .types import BoundConnection, DependencyCache, HasDependencyOverrides
@@ -41,9 +44,6 @@ async def _unavailable_receive() -> Message:
 
 async def _unavailable_send(_: Message) -> None:
     raise ConnectionNotAvailableError
-
-
-_PATCHED_MARKER = "__fastapi_injected_patched__"
 
 
 def _patched_solve_dependencies(base: Callable[..., Any], /) -> Callable[..., Any]:
@@ -79,14 +79,12 @@ def _patched_solve_dependencies(base: Callable[..., Any], /) -> Callable[..., An
             **kwargs,
         )
 
-    setattr(_solve_dependencies, _PATCHED_MARKER, True)
     return _solve_dependencies
 
 
 def install_dependency_cache() -> None:
     for module in (utils, routing):
-        if not getattr(module.solve_dependencies, _PATCHED_MARKER, False):
-            setattr(module, "solve_dependencies", _patched_solve_dependencies(module.solve_dependencies))  # noqa: B010
+        patch_fastapi(module, "solve_dependencies", _patched_solve_dependencies)
 
 
 def _get_dependency_cache(connection: HTTPConnection) -> DependencyCache:
@@ -165,19 +163,12 @@ class InjectionMiddleware:
             await self.app(scope, receive, send)
 
 
-def _wrap_build_middleware_stack(app: FastAPI) -> None:
-    _build_middleware_stack = app.build_middleware_stack
+def _with_injection_middleware(build: Callable[[], ASGIApp], /) -> Callable[[], ASGIApp]:
+    @wraps(build)
+    def _build() -> ASGIApp:
+        return InjectionMiddleware(build())
 
-    @wraps(_build_middleware_stack)
-    def _build_middleware_stack_wrapper() -> ASGIApp:
-        return InjectionMiddleware(_build_middleware_stack())
-
-    app.build_middleware_stack = _build_middleware_stack_wrapper
-    app.build_middleware_stack.__patched__ = True  # type: ignore[ty:missing-attribute]
-
-
-def _is_build_middleware_stack_patched(app: FastAPI) -> bool:
-    return getattr(app.build_middleware_stack, "__patched__", False)
+    return _build
 
 
 async def dependency_resolution_handler(connection: HTTPConnection, exc: Exception) -> Response | None:
@@ -205,11 +196,40 @@ def add_injection(
     install_dependency_cache()
     set_default_app(app)
 
-    if not _is_build_middleware_stack_patched(app):
-        _wrap_build_middleware_stack(app)
+    patch_fastapi(app, "build_middleware_stack", _with_injection_middleware)
 
     if handle_resolution_errors and DependencyResolutionError not in app.exception_handlers:
         app.add_exception_handler(DependencyResolutionError, cast("ExceptionHandler", dependency_resolution_handler))
+
+
+@runtime_checkable
+class _HasRouter(Protocol):
+    router: Router
+
+
+def add_lifespan(root: Router | Starlette, lifespan: Lifespan[Any], /) -> None:
+    match root:
+        case Router():
+            router = root
+        case _HasRouter(router=router):
+            pass
+        case _:
+            raise TypeError(f"{root!r} has no router to attach a lifespan to")
+
+    outer = router.lifespan_context
+
+    @asynccontextmanager
+    async def merged(app: Any) -> AsyncGenerator[Mapping[str, Any] | None]:
+        async with outer(app) as outer_state, lifespan(app) as inner_state:
+            if outer_state is None and inner_state is None:
+                yield None
+            else:
+                yield {
+                    **(outer_state or {}),
+                    **(inner_state or {}),
+                }
+
+    router.lifespan_context = cast(Lifespan[Any], merged)
 
 
 __all__ = [
@@ -217,6 +237,7 @@ __all__ = [
     "InjectionMiddleware",
     "MissingDependencyCacheError",
     "add_injection",
+    "add_lifespan",
     "bind_injection_ctx",
     "dependency_resolution_handler",
     "install_dependency_cache",

@@ -1,23 +1,17 @@
-from typing import Any, cast
+from typing import cast
 
-from fastapi import Depends
-
-from ._calls import annotated
-from ._dataclass import MakeDataclass
+from ._deps_tp import as_annotation
+from ._overrides import ValueOverride
 from .types import DepOf
-
-
-class _Constant[R](MakeDataclass):
-    value: R
-
-    async def __call__(self) -> R:
-        return self.value
 
 
 def Given[R](value: R, /) -> DepOf[R]:  # noqa: N802
     # a dependency that was already resolved by whoever built it - constants that hold
     # the same value are the same dependency, so they are cached and overridden alike
-    return cast("DepOf[R]", annotated(Any, Depends(_Constant(value))))
+    return cast(
+        "DepOf[R]",
+        as_annotation(ValueOverride(value)),
+    )
 
 
 __all__ = [

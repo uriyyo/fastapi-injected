@@ -5,7 +5,6 @@ from typing import Any
 from fastapi.dependencies.models import Dependant
 from fastapi.types import DependencyCacheKey
 
-from ._calls import unwrap_proxy
 from ._dataclass import MakeDataclass
 from .types import DependencyCache
 
@@ -17,7 +16,7 @@ def overridden_calls(dependant: Dependant, overrides: Collection[Any], /) -> fro
     overridden: set[Any] = set()
 
     def _visit(dep: Dependant, /) -> bool:
-        call = unwrap_proxy(dep.call)
+        call = dep.call
         is_overridden = call is not None and call in overrides
 
         for sub_dep in dep.dependencies:
@@ -32,14 +31,6 @@ def overridden_calls(dependant: Dependant, overrides: Collection[Any], /) -> fro
     return frozenset(overridden)
 
 
-def _cache_key(key: DependencyCacheKey, /) -> DependencyCacheKey:
-    # kept under the call a proxy stands for: the proxy is released once its resolve is
-    # done, the entry has to stay reachable for the rest of the context
-    call, *rest = key
-
-    return (unwrap_proxy(call), *rest)  # type: ignore[ty:invalid-explicit-return]
-
-
 class ContextCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):
     cache: DependencyCache
     fallbacks: Sequence[tuple[Mapping[DependencyCacheKey, Any], frozenset[Any]]] = field(default_factory=tuple)
@@ -52,7 +43,6 @@ class ContextCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):
                 yield cache
 
     def __getitem__(self, key: DependencyCacheKey) -> Any:
-        key = _cache_key(key)
 
         try:
             return self.cache[key]
@@ -68,10 +58,10 @@ class ContextCache(MakeDataclass, MutableMapping[DependencyCacheKey, Any]):
         raise KeyError(key)
 
     def __setitem__(self, key: DependencyCacheKey, value: Any) -> None:
-        self.cache[_cache_key(key)] = value
+        self.cache[key] = value
 
     def __delitem__(self, key: DependencyCacheKey) -> None:
-        del self.cache[_cache_key(key)]
+        del self.cache[key]
 
     def __iter__(self) -> Iterator[DependencyCacheKey]:
         seen = set(self.cache)

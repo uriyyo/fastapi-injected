@@ -1,6 +1,6 @@
 from collections import ChainMap
-from collections.abc import Callable, Iterator, MutableMapping
-from typing import TYPE_CHECKING, Any, overload
+from collections.abc import Callable, MutableMapping
+from typing import TYPE_CHECKING, Any, cast, overload
 
 from ._dataclass import MakeDataclass
 from ._deps_tp import is_dep, unwrap_dep_dependency
@@ -32,19 +32,11 @@ type Overrides = dict[Any, Any | ValueOverride | FactoryOverride]
 
 
 def _get_override_key(tp: Any) -> Any:
-    if is_dep(tp):
-        value = unwrap_dep_dependency(tp)
-
-        if value is not None:
-            return value
-
-    return tp
+    return unwrap_dep_dependency(tp) if is_dep(tp) else tp
 
 
 def _create_resolver[T](val: T, /) -> Any:
     match val:
-        case ValueOverride():
-            return val
         case FactoryOverride(factory):
             return factory
         case _ if callable(val):
@@ -52,14 +44,6 @@ def _create_resolver[T](val: T, /) -> Any:
             return val
         case _:
             return ValueOverride(val)
-
-
-def _provider_overrides(obj: Any | None, /) -> Iterator[MutableMapping[Any, Any]]:
-    if obj is None:
-        return
-
-    if isinstance(obj, HasDependencyOverrides):
-        yield obj.dependency_overrides
 
 
 def normalize_overrides(
@@ -70,7 +54,12 @@ def normalize_overrides(
 ) -> MutableMapping[Any, Any]:
     return ChainMap(
         {_get_override_key(key): _create_resolver(value) for key, value in (overrides or {}).items()},
-        *_provider_overrides(provider),
+        # an app keeps its overrides in a dict
+        *(
+            [cast("MutableMapping[Any, Any]", provider.dependency_overrides)]
+            if isinstance(provider, HasDependencyOverrides)
+            else []
+        ),
     )
 
 

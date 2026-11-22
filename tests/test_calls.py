@@ -1,12 +1,15 @@
-import inspect
+import gc
+import weakref
+from contextlib import nullcontext
 from functools import wraps
-from typing import Annotated, Any
+from typing import Any
 
 import pytest
 from fastapi import Depends
+from fastapi.dependencies import models
 
 from fastapi_injected import injection_ctx, resolve
-from fastapi_injected._calls import CallProxy, DetachedOverrides, is_static_annotation, is_static_call
+from fastapi_injected._calls import _is_static_call, is_static_annotation, runtime_calls
 
 pytestmark = pytest.mark.asyncio
 
@@ -51,29 +54,11 @@ class Unhashable:
     ],
 )
 async def test_what_counts_as_written_in_source(call: Any, expected: bool):
-    assert is_static_call(call) is expected
+    assert _is_static_call(call) is expected
 
 
 async def test_an_annotation_without_metadata_is_not_static():
     assert not is_static_annotation(int)
-
-
-async def test_a_released_proxy_lets_go_of_its_call():
-    proxy = CallProxy(module_level, [])
-    proxy.release()
-
-    assert proxy.call is None
-    assert not hasattr(proxy, "__wrapped__")
-    assert proxy == proxy  # noqa: PLR0124
-    assert proxy != module_level
-
-
-async def test_a_proxy_of_an_unhashable_call_is_hashed_by_identity():
-    call = Unhashable()
-    proxy = CallProxy(call, [])
-
-    assert hash(proxy) == id(call)
-    assert proxy() == 1
 
 
 class One:
@@ -90,39 +75,32 @@ class Defaulted:
         return self.value + one
 
 
-async def test_a_dependency_written_as_a_default_is_detached_too():
+async def test_a_dependency_written_as_a_default_is_resolved():
     async with injection_ctx():
         assert await resolve(Defaulted(41)) == 42
 
 
-async def test_a_proxy_shows_fastapi_the_signature_it_stands_for():
-    async def call(value: Annotated[int, Depends(module_level)]) -> int:  # pragma: no cover
-        return value
+@pytest.mark.parametrize(("inside", "released"), [(True, True), (False, False)])
+async def test_fastapi_keeps_a_runtime_call_classified_only_outside_runtime_calls(inside: bool, released: bool):
+    call = One()
+    ref = weakref.ref(call)
 
-    # FastAPI reads the parameters only, its own typed signature drops the return annotation
-    assert inspect.signature(CallProxy(call, [])).parameters == inspect.signature(call).parameters
+    with runtime_calls() if inside else nullcontext():
+        models._is_coroutine_callable(call)  # noqa: SLF001
 
+    del call
+    gc.collect()
 
-async def test_detached_overrides_hand_out_what_was_made_at_runtime_behind_a_proxy():
-    value = One()
-
-    with DetachedOverrides({module_level: value, One: module_level}) as overrides:
-        assert overrides.dependency_overrides is overrides
-        assert (list(overrides), len(overrides), bool(overrides)) == ([module_level, One], 2, True)
-        assert overrides[One] is module_level  # written in source, nothing to detach
-        assert overrides[module_level] is overrides[module_level]
-        assert overrides[module_level] == value
-        proxy = overrides[module_level]
-
-    # leaving the context releases what was handed out
-    assert proxy.call is None
-    assert not DetachedOverrides({})
+    assert (ref() is None) is released
 
 
-async def test_leaving_a_root_proxy_releases_the_ones_made_for_its_dependencies():
-    with CallProxy(Defaulted(41)) as root:
-        nested = inspect.signature(root).parameters["one"].default.dependency
-        assert isinstance(nested, CallProxy)
+async def test_the_call_classifiers_are_patched_once():
+    await resolve(Defaulted(1))
+    patched = models._is_gen_callable_cached  # noqa: SLF001
 
-    assert root.call is None
-    assert nested.call is None
+    await resolve(Defaulted(1))
+
+    assert models._is_gen_callable_cached is patched  # noqa: SLF001
+    # what it wraps is FastAPI's own lru cache, not another patch
+    assert not getattr(patched.__wrapped__, "__fastapi_injected_patched__", False)
+    assert patched.cache_info().maxsize == models._CALLABLE_CLASSIFICATION_CACHE_SIZE  # noqa: SLF001

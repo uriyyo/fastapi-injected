@@ -1,23 +1,23 @@
-import dataclasses
 import inspect
-import typing
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import ExitStack
-from typing import Any, Self, get_args, get_origin
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+from typing import Any
 
-from fastapi.dependencies.utils import get_typed_signature
 from fastapi.params import Depends
 
-from ._deps_tp import unwrap_tp
+from ._deps_tp import annotated_parts
+from ._fastapi_compat import patch_call_classifiers
+from .ctx import set_var
+
+_RUNTIME_CALLS: ContextVar[bool] = ContextVar(
+    "fastapi_injected_runtime_calls",
+    default=False,
+)
 
 
-def annotated(tp: Any, /, *metadata: Any) -> Any:
-    # `Annotated[...]` goes through typing's own cache, which holds on to the last
-    # aliases it built - and with them whatever value a runtime marker carries
-    return typing._AnnotatedAlias(tp, metadata)  # type: ignore[ty:missing-attribute] # noqa: SLF001
-
-
-def is_static_call(call: Any, /) -> bool:
+def _is_static_call(call: Any, /) -> bool:
     # what source code wrote down lives as long as the process anyway, so caching
     # by it keeps nothing extra alive - an instance or a closure may carry request data
     if inspect.isclass(call):
@@ -34,22 +34,11 @@ def is_static_call(call: Any, /) -> bool:
     return False
 
 
-def _depends_metadata(annotation: Any, /) -> tuple[Any, list[Any]] | None:
-    annotation = unwrap_tp(annotation)
-
-    if get_origin(annotation) is not typing.Annotated:
-        return None
-
-    tp, *metadata = get_args(annotation)
-
-    return tp, metadata
-
-
 def is_static_annotation(annotation: Any, /) -> bool:
-    match _depends_metadata(annotation):
+    match annotated_parts(annotation):
         case (tp, metadata):
             return all(
-                is_static_call(tp if meta.dependency is None else meta.dependency)
+                _is_static_call(tp if meta.dependency is None else meta.dependency)
                 for meta in metadata
                 if isinstance(meta, Depends)
             )
@@ -57,152 +46,31 @@ def is_static_annotation(annotation: Any, /) -> bool:
             return False
 
 
-class CallProxy:
-    # what FastAPI is handed in place of a call made at runtime: its classification
-    # caches keep every call they are shown, and once released this is all they keep
-    __slots__ = ("_hash", "_proxies", "_signature", "call")
+def _skip_cache_for_runtime_calls(cached: Callable[[Any], bool], /) -> Callable[[Any], bool]:
+    @wraps(cached)
+    def classify(identity: Any, /) -> bool:
+        if _RUNTIME_CALLS.get() and not _is_static_call(identity.call):
+            return cached.__wrapped__(identity)  # type: ignore[ty:missing-attribute]
 
-    def __init__(self, call: Callable[..., Any], proxies: list["CallProxy"] | None = None, /) -> None:
-        self.call: Callable[..., Any] | None = call
-        # a root proxy owns the list, the ones made for its dependencies share it
-        self._proxies = [] if proxies is None else proxies
-        self._signature: inspect.Signature | None = None
+        return cached(identity)
 
-        try:
-            self._hash = hash(call)
-        except TypeError:
-            self._hash = id(call)
+    classify.cache_clear = cached.cache_clear  # type: ignore[ty:missing-attribute]
+    classify.cache_info = cached.cache_info  # type: ignore[ty:missing-attribute]
 
-        self._proxies.append(self)
-
-    @property
-    def __wrapped__(self) -> Callable[..., Any]:
-        # FastAPI unwraps a call to tell a coroutine from a generator, so it sees the
-        # real one - a released proxy has nothing left to show
-        if self.call is None:
-            raise AttributeError("__wrapped__")
-
-        return self.call
-
-    @property
-    def __signature__(self) -> inspect.Signature:
-        # FastAPI builds the dependencies of this call from its signature, so whatever
-        # was made at runtime among them is handed over behind a proxy as well
-        if self._signature is None:
-            sign = get_typed_signature(self.__wrapped__)
-            self._signature = sign.replace(
-                parameters=[self._detach_param(param) for param in sign.parameters.values()],
-            )
-
-        return self._signature
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.__wrapped__(*args, **kwargs)
-
-    def __hash__(self) -> int:
-        return self._hash
-
-    def __eq__(self, other: object) -> bool:
-        # equal to the call it stands for, so it finds the same cache entries and overrides
-        if self.call is None:
-            return other is self
-
-        return self.call == unwrap_proxy(other)
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        for proxy in self._proxies:
-            proxy.release()
-
-    def release(self) -> None:
-        self.call = None
-        self._signature = None
-        self._proxies = []
-
-    def _detach_depends(self, depends: Depends, /) -> Depends:
-        if depends.dependency is None or is_static_call(depends.dependency):
-            return depends
-
-        return dataclasses.replace(
-            depends,
-            dependency=CallProxy(depends.dependency, self._proxies),
-        )
-
-    def _detach_param(self, param: inspect.Parameter, /) -> inspect.Parameter:
-        if isinstance(param.default, Depends):
-            param = param.replace(
-                default=self._detach_depends(param.default),
-            )
-
-        match _depends_metadata(param.annotation):
-            case (tp, metadata):
-                detached = [self._detach_depends(meta) if isinstance(meta, Depends) else meta for meta in metadata]
-
-                if any(new is not old for new, old in zip(detached, metadata, strict=True)):
-                    param = param.replace(annotation=annotated(tp, *detached))
-
-        return param
+    return classify
 
 
-class DetachedOverrides(Mapping[Any, Any]):
-    # an override replaces a call inside FastAPI, past where a proxy could be put on it,
-    # so the overrides of a resolve hand out what they hold behind one
-    __slots__ = ("_handed", "_overrides", "_stack")
-
-    def __init__(self, overrides: Mapping[Any, Any], /) -> None:
-        self._overrides = overrides
-        self._stack = ExitStack()
-        self._handed: dict[int, CallProxy] = {}
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self._stack.close()
-        self._handed = {}
-
-    @property
-    def dependency_overrides(self) -> Mapping[Any, Any]:
-        # FastAPI asks a provider for its overrides, and this is both
-        return self
-
-    def __getitem__(self, key: Any) -> Any:
-        override = self._overrides[key]
-
-        if is_static_call(override):
-            return override
-
-        if (proxy := self._handed.get(id(override))) is None:
-            proxy = self._handed[id(override)] = self._stack.enter_context(CallProxy(override))
-
-        return proxy
-
-    def __iter__(self) -> Iterator[Any]:
-        return iter(self._overrides)
-
-    def __len__(self) -> int:
-        return len(self._overrides)
-
-    def __bool__(self) -> bool:
-        # FastAPI takes the override path only when there are some, and asks at every step
-        return bool(self._overrides)
+patch_call_classifiers(_skip_cache_for_runtime_calls)
 
 
-def unwrap_proxy(call: Any, /) -> Any:
-    match call:
-        case CallProxy(call=_call) if _call is not None:
-            return _call
-        case _:
-            return call
+@contextmanager
+def runtime_calls() -> Generator[bool, Any, Any]:
+    # FastAPI caches every call it classifies, so a call made at runtime is classified uncached
+    with set_var(_RUNTIME_CALLS, True):
+        yield True
 
 
 __all__ = [
-    "CallProxy",
-    "DetachedOverrides",
-    "annotated",
     "is_static_annotation",
-    "is_static_call",
-    "unwrap_proxy",
+    "runtime_calls",
 ]

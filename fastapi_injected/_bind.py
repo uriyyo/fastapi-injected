@@ -1,18 +1,15 @@
 import inspect
 from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Annotated, Any, Concatenate, get_origin, overload
+from typing import Any, Concatenate, overload
 
 from fastapi.params import Depends
 
-from ._calls import annotated
-from ._deps_tp import unwrap_tp
+from ._deps_tp import annotated_parts, as_annotation, unwrap_tp
 from ._errors import InjectedError
 from .deps import _named_param
-from .signature import Signature
+from .signature import Signature, dep_arg_index, dep_arg_name
 from .types import AsyncFunc, DepOf, Func
-
-_DEP_ARG_PREFIX = "__dep_arg_"
 
 
 class UnboundDepArgsError(InjectedError, ValueError):
@@ -22,36 +19,16 @@ class UnboundDepArgsError(InjectedError, ValueError):
         self.indexes = indexes
 
 
-def dep_arg_name(index: int, /) -> str:
-    return f"{_DEP_ARG_PREFIX}{index}"
-
-
-def _dep_arg_index(name: str, /) -> int | None:
-    if not name.startswith(_DEP_ARG_PREFIX):
-        return None
-
-    index = name[len(_DEP_ARG_PREFIX) :]
-
-    return int(index) if index.isdigit() else None
-
-
-def _is_annotation(tp: Any, /) -> bool:
-    return get_origin(unwrap_tp(tp)) is Annotated
-
-
 def _dep_annotation(dep: DepOf[Any] | Callable[..., Any], /) -> Any:
-    if isinstance(dep, Depends):
-        return annotated(Any, dep)
-
-    if _is_annotation(dep):
-        # bound, a marker is read under the made-up `__dep_arg_N` name, so it must name its own
-        _named_param(unwrap_tp(dep))
-        return dep
-
-    if not callable(dep):
-        return dep
-
-    return annotated(Any, Depends(dep))
+    match dep:
+        case _ if annotated_parts(dep) is not None:
+            # bound, a marker is read under the made-up `__dep_arg_N` name, so it must name its own
+            _named_param(unwrap_tp(dep))
+            return dep
+        case _ if isinstance(dep, Depends) or callable(dep):
+            return as_annotation(dep)
+        case _:
+            return dep
 
 
 def signature_with_deps(
@@ -59,27 +36,11 @@ def signature_with_deps(
     /,
     *deps: DepOf[Any] | Callable[..., Any],
 ) -> Signature:
-    sign = Signature.of(func)
-    bound = [*sign.parameters][: len(deps)]
-
-    if len(deps) > len(bound):
-        msg = f"{len(deps)} dependencies cannot be bound to {len(bound)} parameters"
-        raise TypeError(msg)
-
-    return sign.drop(*bound).prepend(
-        *(
-            inspect.Parameter(
-                dep_arg_name(index),
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=_dep_annotation(dep),
-            )
-            for index, dep in enumerate(deps)
-        ),
-    )
+    return Signature.of(func).with_dep_args(*(_dep_annotation(dep) for dep in deps))
 
 
 def take_dep_args(kwargs: dict[str, Any], /) -> list[Any]:
-    indexes = sorted(index for name in kwargs if (index := _dep_arg_index(name)) is not None)
+    indexes = sorted(index for name in kwargs if (index := dep_arg_index(name)) is not None)
 
     # they are passed by name and taken back by position, so a gap in them would move
     # every argument after it - it is a bug in whoever built the signature, not an input

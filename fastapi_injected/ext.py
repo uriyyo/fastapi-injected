@@ -1,5 +1,4 @@
 from ._bind import NotAsyncError, UnboundDepArgsError, is_async_callable, remap_dep_args, signature_with_deps
-from ._calls import annotated
 from ._dataclass import MakeDataclass
 from ._deps_tp import (
     DependsSource,
@@ -25,7 +24,6 @@ __all__ = [
     "MissedDependencyError",
     "NotAsyncError",
     "UnboundDepArgsError",
-    "annotated",
     "as_depends",
     "clear_dependant_cache",
     "ensure_injection_ctx",

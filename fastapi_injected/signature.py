@@ -1,8 +1,7 @@
 import inspect
-from collections.abc import Callable, Generator, Mapping
-from enum import StrEnum, auto
+from collections.abc import Callable, Mapping
 from functools import wraps
-from typing import Annotated, Any, NotRequired, Self, TypedDict, Unpack, cast
+from typing import Annotated, Any, Self, cast
 
 from fastapi import params
 from fastapi.dependencies.models import Dependant
@@ -12,6 +11,8 @@ from typing_inspection.typing_objects import is_typealiastype
 from ._deps_tp import DependsSource, as_depends, is_arg, is_dep, is_request_param, unwrap_tp
 from ._errors import InjectedError
 from .types import Func, HasSignature, Injected
+
+_DEP_ARG_PREFIX = "__dep_arg_"
 
 
 class NotADependencyError(InjectedError, TypeError):
@@ -24,7 +25,17 @@ class NotADependencyError(InjectedError, TypeError):
         self.name = name
 
 
-type SignatureSource = Callable[..., Any] | inspect.Signature
+def dep_arg_name(index: int, /) -> str:
+    return f"{_DEP_ARG_PREFIX}{index}"
+
+
+def dep_arg_index(name: str, /) -> int | None:
+    if not name.startswith(_DEP_ARG_PREFIX):
+        return None
+
+    index = name[len(_DEP_ARG_PREFIX) :]
+
+    return int(index) if index.isdigit() else None
 
 
 def _typed_signature(
@@ -44,6 +55,7 @@ def _typed_signature(
     sign = inspect.signature(func)
 
     returns = inspect.Signature.empty
+
     if include_return and sign.return_annotation is not inspect.Signature.empty:
         returns = get_typed_annotation(sign.return_annotation, ns)
 
@@ -53,18 +65,33 @@ def _typed_signature(
     )
 
 
-class ParamRole(StrEnum):
-    dep = auto()  # Dep[...] or a Depends(...) default
-    request = auto()  # Header(), Query(), Body(), ... annotation
-    arg = auto()  # Arg[...]
-    plain = auto()
+def _resolved_param(param: inspect.Parameter, /) -> inspect.Parameter | None:
+    # what FastAPI resolves for an injectable function, None for what the caller passes
+    if is_arg(param.annotation):
+        resolved = False
+    elif is_dep(param.annotation) or isinstance(param.default, params.Depends):
+        resolved = True
+    elif is_request_param(param.annotation):
+        # a request parameter is the caller's, unless the function asks for it to be injected
+        resolved = param.default is Injected
+    else:
+        resolved = False
 
+    if not resolved:
+        # nothing else would explain that default, and the missing `Dep[...]` would surface much later
+        if param.default is Injected:
+            raise NotADependencyError(param.name)
 
-class _ParamChanges(TypedDict):
-    name: NotRequired[str]
-    kind: NotRequired[inspect._ParameterKind]
-    annotation: NotRequired[Any]
-    default: NotRequired[Any]
+        return None
+
+    if param.default is Injected:
+        param = param.replace(default=inspect.Parameter.empty)
+
+    if is_typealiastype(param.annotation):
+        # FastAPI would evaluate the alias eagerly
+        param = param.replace(annotation=unwrap_tp(param.annotation))
+
+    return param
 
 
 class Signature(inspect.Signature):
@@ -73,7 +100,7 @@ class Signature(inspect.Signature):
     @classmethod
     def of(
         cls,
-        source: SignatureSource,
+        source: Callable[..., Any] | inspect.Signature,
         /,
         *,
         globalns: Mapping[str, Any] | None = None,
@@ -93,158 +120,96 @@ class Signature(inspect.Signature):
             return_annotation=sign.return_annotation,
         )
 
-    @staticmethod
-    def role(param: inspect.Parameter, /) -> ParamRole:
-        match param:
-            case _ if is_arg(param.annotation):
-                return ParamRole.arg
-            case _ if is_dep(param.annotation) or isinstance(param.default, params.Depends):
-                return ParamRole.dep
-            case _ if is_request_param(param.annotation):
-                return ParamRole.request
-            case _:
-                return ParamRole.plain
+    @classmethod
+    def build(cls, returns: Any = inspect.Signature.empty, /, **annotations: Any) -> Self:
+        return cls(
+            [
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=annotation,
+                )
+                for name, annotation in annotations.items()
+            ],
+            return_annotation=returns,
+        )
 
-    def select(self, *roles: ParamRole) -> Generator[inspect.Parameter]:
-        for param in self.parameters.values():
-            if self.role(param) in roles:
-                yield param
+    def __getitem__(self, key: int | str, /) -> inspect.Parameter:
+        match key:
+            case int():
+                return [*self.parameters.values()][key]
+            case str():
+                return self.parameters[key]
 
-    @property
-    def annotations(self) -> dict[str, Any]:
-        return {
-            param.name: param.annotation
-            for param in self.parameters.values()
-            if param.annotation is not inspect.Parameter.empty
-        }
+    def deps_only(self) -> Self:
+        return self.replace(
+            parameters=[kept for param in self.parameters.values() if (kept := _resolved_param(param)) is not None],
+        )
 
-    @property
-    def defaults(self) -> dict[str, Any]:
-        return {
-            param.name: param.default
-            for param in self.parameters.values()
-            if param.default is not inspect.Parameter.empty
-        }
-
-    def add(self, *extra: inspect.Parameter) -> Self:
-        added = [
-            param.replace(
-                kind=inspect.Parameter.KEYWORD_ONLY,
+    def without_deps(self, dependant: Dependant, /) -> Self:
+        resolved = {
+            param.name
+            for param in (
+                *dependant.dependencies,
+                *dependant.path_params,
+                *dependant.query_params,
+                *dependant.header_params,
+                *dependant.cookie_params,
+                *dependant.body_params,
             )
-            for param in extra
-            if param.name not in self.parameters
-        ]
+        }
 
+        return self.replace(
+            parameters=[param for param in self.parameters.values() if param.name not in resolved],
+        )
+
+    def with_dep_args(self, *annotations: Any) -> Self:
         present = [*self.parameters.values()]
 
-        var_kw = [param for param in present if param.kind is inspect.Parameter.VAR_KEYWORD]
-        rest = [param for param in present if param.kind is not inspect.Parameter.VAR_KEYWORD]
+        if len(annotations) > len(present):
+            raise TypeError(f"{len(annotations)} dependencies cannot be bound to {len(present)} parameters")
 
-        return self.replace(parameters=[*rest, *added, *var_kw])
+        # placeholders FastAPI resolves by name, handed back by position at call time
+        bound = [
+            inspect.Parameter(
+                dep_arg_name(index),
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=annotation,
+            )
+            for index, annotation in enumerate(annotations)
+        ]
 
-    def drop(self, *names: str) -> Self:
-        return self.replace(parameters=[param for param in self.parameters.values() if param.name not in names])
+        return self.replace(parameters=[*bound, *present[len(annotations) :]])
 
-    def update(self, name: str, /, **changes: Unpack[_ParamChanges]) -> Self:
+    def provide(self, name: str, dep: DependsSource, /) -> Self:
         if name not in self.parameters:
             raise LookupError(f"no parameter named {name!r} in {self}")
 
         return self.replace(
             parameters=[
-                param.replace(**changes) if param.name == name else param for param in self.parameters.values()
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=Annotated[Any, as_depends(dep)],
+                )
+                if param.name == name
+                else param
+                for param in self.parameters.values()
             ],
-        )
-
-    def prepend(self, *extra: inspect.Parameter) -> Self:
-        added = [
-            param.replace(kind=inspect.Parameter.POSITIONAL_OR_KEYWORD)
-            for param in extra
-            if param.name not in self.parameters
-        ]
-
-        return self.replace(parameters=[*added, *self.parameters.values()])
-
-    def rename(self, old: str, new: str, /) -> Self:
-        return self.update(old, name=new)
-
-    def returns(self, annotation: Any, /) -> Self:
-        return self.replace(return_annotation=annotation)
-
-    def add_dep(
-        self,
-        name: str,
-        dep: DependsSource,
-        /,
-        *,
-        annotation: Any = Any,
-    ) -> Self:
-        param = inspect.Parameter(
-            name,
-            inspect.Parameter.KEYWORD_ONLY,
-            annotation=Annotated[annotation, as_depends(dep)],
-        )
-
-        return self.add(param)
-
-    def prepare(self) -> Self:
-        def _is_dep(param: inspect.Parameter) -> bool:
-            match self.role(param):
-                case ParamRole.dep:
-                    return True
-                case ParamRole.request:
-                    # a request parameter is the caller's, unless the function asks for it to be injected
-                    return param.default is Injected
-                case _:
-                    return False
-
-        def _keep(param: inspect.Parameter) -> inspect.Parameter | None:
-            if not _is_dep(param):
-                # nothing else would explain that default, and the missing `Dep[...]` would
-                # otherwise surface much later as a missing argument
-                if param.default is Injected:
-                    raise NotADependencyError(param.name)
-
-                return None
-
-            if param.default is Injected:
-                param = param.replace(default=inspect.Parameter.empty)
-
-            if is_typealiastype(param.annotation):
-                # FastAPI would evaluate the alias eagerly
-                param = param.replace(annotation=unwrap_tp(param.annotation))
-
-            return param
-
-        return self.replace(
-            parameters=[kept for param in self.parameters.values() if (kept := _keep(param)) is not None],
-        )
-
-    def strip(self, dependant: Dependant, /) -> Self:
-        params_ = (
-            *dependant.dependencies,
-            *dependant.path_params,
-            *dependant.query_params,
-            *dependant.header_params,
-            *dependant.cookie_params,
-            *dependant.body_params,
-        )
-
-        return self.drop(
-            *(name for param in params_ if (name := param.name)),
         )
 
     def apply[**P, R](self, func: Func[P, R], /) -> Func[P, R]:
         cast(HasSignature, func).__signature__ = self
         return func
 
-    def wrap(self, func: Callable[..., Any], /) -> Callable[..., Any]:
+    def wrap[**P, R](self, func: Func[P, R], /) -> Func[P, R]:
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
             async def _async_call(*args: Any, **kwargs: Any) -> Any:
                 return await func(*args, **kwargs)
 
-            return self.apply(_async_call)
+            return self.apply(_async_call)  # type: ignore[ty:invalid-explicit-return]
 
         # generators too: FastAPI unwraps `__wrapped__` to tell what kind of call it is
         @wraps(func)
@@ -256,7 +221,5 @@ class Signature(inspect.Signature):
 
 __all__ = [
     "NotADependencyError",
-    "ParamRole",
     "Signature",
-    "SignatureSource",
 ]

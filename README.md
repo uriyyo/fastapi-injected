@@ -391,7 +391,7 @@ It is a `MakeDataclass`, so instances built from equal markers are equal — and
 
 ### Objects that bring their own `Depends`
 
-An object with a `__get_depends__()` method is resolved through the `Depends` it returns instead of its own call - by `resolve`, `as_depends`, `add_route_dependency` and `reflect`. The protocol is `fastapi_injected.types.HasDependsHook`:
+An object with a `__get_depends__()` method is resolved through the `Depends` it returns instead of its own call - by `resolve`, `as_depends` and `walk`. The protocol is `fastapi_injected.types.HasDependsHook`:
 
 ```python
 class Guarded:
@@ -417,46 +417,38 @@ await resolve(Guarded())  # resolves `require_admin`
 - `annotated(tp, *metadata)` — `Annotated[tp, *metadata]` without typing's cache, which would keep runtime markers alive.
 - `as_depends(dep)` — the `Depends` for a marker, a `__get_depends__` object or a callable (`DependsSource`).
 
-### Reflecting on apps and dependency trees
+### Walking routes and dependency trees
 
-`fastapi_injected.reflect` answers the questions tests and tooling keep asking about an app, without walking `Dependant` trees or `app.routes` by hand.
+`fastapi_injected.walk` answers the questions tests and tooling keep asking about an app, without walking `Dependant` trees or `app.routes` by hand.
 
 ```python
-from fastapi_injected.reflect import find_route, iter_api_routes, iter_calls, iter_security
+from fastapi_injected.walk import iter_calls, iter_endpoints, iter_security
 
 # every APIRoute with its full path, through include_router, Mount and Host
-for path, route in iter_api_routes(app):
+for path, route in iter_endpoints(app):
     assert get_current_user in iter_calls(route.dependant), path
-
-route = find_route(app, method="POST", path="/items")  # or name="create_item"
 
 # security schemes a route (or any callable) pulls in, with their OAuth scopes
 assert list(iter_security(route.dependant)) == [(bearer, ["items:write"])]
 ```
 
-- `iter_dependant(root, *, mode="bfs" | "dfs")` — every `Dependant` under `root`, the root first.
+- `iter_endpoints(app)` — `(path, route)` for every FastAPI HTTP and websocket route (`Endpoint`), with mounts, hosts and included routers expanded and the path prefixed accordingly.
 - `iter_calls(root, *, expand=None)` — unique callables `root` depends on, the root itself excluded. `expand(call)` returns extra calls to report for callables that hold more dependencies than their signature shows, such as composite permissions.
 - `iter_security(root)` — `(scheme, scopes)` for every `SecurityBase` in the tree.
-- `find_dependant(root, call)` — the chain of dependants from the root down to `call`, for saying *through what* a dependency is reached.
-- `iter_overridden(root, overrides)` — the calls an override map or collection replaces, including every dependant above a replaced one, which is what stops caching across an override.
-- `iter_routes(app)` — `(path, route)` for every route, with mounts, hosts and included routers expanded and the path prefixed accordingly. `iter_api_routes` keeps only FastAPI's HTTP and websocket routes, and `find_route(app, *, method=, path=, name=)` returns the first one matching every given filter, raising `LookupError` otherwise. Websocket routes answer to the method `WEBSOCKET`.
-- `iter_routes_where(app, pred)` — `(method, path, route)` for every route `pred` accepts, one entry per method. The usual authorization test is `iter_routes_where(app, lambda r: guard not in iter_calls(r.dependant))`.
-- `iter_operations(app_or_schema)` and `operation_for(app_or_schema, method, path)` — walk the OpenAPI document by `(path, method, operation)` instead of indexing nested dicts.
-- `iter_routers(app)` — `(prefix, router)` for the app's router and every router included or mounted under it.
-- `match_route(app, request_or_scope)` — `(path_template, route)` for the route that would handle a request, through mounts, hosts and included routers; `None` when nothing matches. Useful in middleware, where `request.scope["route"]` is not set yet.
-- `iter_params(root)` — `(dependant, kind, field)` for every path, query, header, cookie and body parameter in the tree.
-- `response_type(route, *, strip=True)` — the route's response type, falling back to the endpoint's return annotation, with `Annotated` and `| None` stripped unless `strip=False`.
-- `Signature`, in `fastapi_injected.signature`, is an `inspect.Signature` with operations for decorators and dependencies that need FastAPI to see parameters a function did not declare. `Signature.of(func_or_signature)` starts one; each operation returns a new `Signature`, and `.apply(func)` sets it on a function. `globalns=`/`localns=` add names its annotations need beyond the module of `func`, and `include_return=True` keeps the return annotation.
-  - `.add(*parameters)` — extra keyword-only parameters before `**kwargs`; names already present are kept as they are.
-  - `.drop(*names)` and `.update(name, **changes)` — drop parameters a wrapper consumes itself, or change one parameter's annotation, default or kind.
-  - `.add_dep(name, dep, *, annotation=Any)` — a parameter FastAPI resolves with a `Depends`/`Security` marker or a callable.
-  - `.prepend(*parameters)`, `.rename(old, new)` and `.returns(annotation)` — positional parameters at the front, a renamed parameter, a new return annotation.
-  - `Signature.role(parameter)` — which `ParamRole` a parameter plays: `dep` for `Dep[...]` or a `Depends` default, `request` for `Header()`/`Query()`/..., `arg` for `Arg[...]`, `plain` otherwise. `.select(*roles)` yields the parameters with those roles; `.annotations` and `.defaults` are name-to-value mappings of what is declared.
-  - `.wrap(func)` — a forwarder to `func`, async when `func` is, carrying this signature; `.apply(func)` sets the signature on `func` itself.
-- `add_route_dependency(route, *deps)` — append dependencies to an `APIRoute` or `APIWebSocketRoute` that is already built, and rebuild what FastAPI derived from its dependencies. An included router serves its own copy of a route: pass `root=` - the app or router it was included into - and the copy is rebuilt too.
-- `add_lifespan(app_or_router, lifespan)` — run a lifespan inside the one already set, merging the state both yield, for libraries that need a startup step on an app they did not create.
 
-`root` for the dependency helpers is a `Dependant`, a `Depends(...)` marker or a plain callable; `as_dependant` is the conversion they share. A plain callable is read the way FastAPI would, with `Injected` defaults treated as dependencies.
+`root` for the dependency helpers is a `Dependant`, a `Depends(...)` marker or a plain callable. A plain callable is read the way FastAPI would.
+
+### Signature
+
+`Signature`, in `fastapi_injected.signature`, is an `inspect.Signature` for decorators and dependencies that need FastAPI to see parameters a function did not declare. Each operation returns a new `Signature`.
+
+- `Signature.of(func_or_signature, *, globalns=None, localns=None, include_return=False)` — the signature with its annotations evaluated. `globalns`/`localns` add names beyond the module of `func`; `include_return=True` keeps the return annotation.
+- `Signature.build(returns, /, **annotations)` — a new signature of `name=annotation` parameters. The return annotation is the optional positional argument, so `returns=` is still a parameter name.
+- `.deps_only()` — only what FastAPI resolves for an injectable function: `Dep[...]`, `Depends(...)` defaults and request parameters defaulting to `Injected`. `Injected` defaults are dropped; `Injected` on anything else raises `NotADependencyError`.
+- `.without_deps(dependant)` — what a caller still passes once everything `dependant` resolves is taken away.
+- `.with_dep_args(*annotations)` — the leading parameters replaced by placeholders annotated with these dependencies, the signature behind `bind_deps`.
+- `.provide(name, dep)` — the parameter `name` resolved from `dep` instead of passed in.
+- `.apply(func)` sets the signature on `func`; `.wrap(func)` returns a forwarder to `func` carrying it, async when `func` is.
 
 ### Adding to the OpenAPI schema
 
@@ -473,7 +465,7 @@ add_openapi_hook(app, lambda app, schema: {**schema, "x-version": "1"})
 
 ### FastAPI request integration
 
-Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injection`: it adds `InjectionMiddleware`, which opens the context for the whole request and binds it to the route's connection once the route is found - before or after routers are included. FastAPI is patched by `add_injection` or `InjectionMiddleware`, not on import. Add it after your other middleware, so the context is open for them too:
+Inside a FastAPI app, `@inject`-ed functions and `resolve` can share the request's own dependency cache — the same instances FastAPI built for the handler. Call `add_injection`: it adds `InjectionMiddleware`, which opens the context for the whole request and binds it to the route's connection once the route is found - before or after routers are included. FastAPI's dependency solving is patched by `add_injection` or `InjectionMiddleware`, not on import. The one thing done on import keeps FastAPI from caching dependencies made at runtime, and it changes nothing outside `resolve` and `@inject`. Add it after your other middleware, so the context is open for them too:
 
 ```python
 from fastapi import FastAPI
@@ -554,6 +546,8 @@ The body is read only when the resolved dependency declares one, and it is read 
 
 `injection_ctx(request=...)` accepts either a `Request` or a `WebSocket`, and so does everything that reads `InjectionContext.request` — the union is `fastapi_injected.types.BoundConnection`.
 
+
+`add_lifespan(app_or_router, lifespan)`, in `fastapi_injected.fastapi`, runs a lifespan inside the one already set and merges the state both yield, for libraries that need a startup step on an app they did not create.
 ## What is public
 
 The root package is what you need to use the library, and the surface a release keeps:
@@ -573,10 +567,10 @@ Code that builds on the library imports from the submodule that owns the piece. 
 | `fastapi_injected.ext` | `MakeDataclass`, `MakeInjected`, `signature_with_deps`, `remap_dep_args`, `is_dep`, `is_arg`, `is_request_param`, `unwrap_dep_tp`, `unwrap_dep_dependency`, `unwrap_tp`, `strip_annotation`, `annotated`, `is_async_callable`, `as_depends`, `DependsSource`, `clear_dependant_cache`, `ensure_injection_ctx`, `MissedDependencyError`, `NotAsyncError`, `UnboundDepArgsError`, `InvalidMarkerError` |
 | `fastapi_injected.types` | `DepOf`, `ArgMarker`, `HasDependsHook`, and the typing vocabulary the signatures are written in — `DepReturn`, `DepShape`, `DepDecl`, `AsyncFunc`, `Coro`, `BoundConnection`, `DependencyCache` and friends |
 | `fastapi_injected.overrides` | `Overrides`, `OverridesProvider`, `OverrideBlock` |
-| `fastapi_injected.signature` | `Signature`, `ParamRole` |
-| `fastapi_injected.fastapi` | `InjectionMiddleware`, `bind_injection_ctx`, `dependency_resolution_handler`, `install_dependency_cache`, `MissingDependencyCacheError` |
+| `fastapi_injected.signature` | `Signature`, `NotADependencyError` |
+| `fastapi_injected.fastapi` | `InjectionMiddleware`, `bind_injection_ctx`, `dependency_resolution_handler`, `install_dependency_cache`, `add_lifespan`, `MissingDependencyCacheError` |
 | `fastapi_injected.openapi` | `add_openapi_hook`, `add_openapi`, `invalidate_openapi`, `HasDocDepends`, `iter_doc_depends`, `OpenAPIHook` |
-| `fastapi_injected.reflect` | `iter_dependant`, `iter_calls`, `iter_security`, `iter_params`, `find_dependant`, `iter_overridden`, `iter_routes`, `iter_api_routes`, `iter_routes_where`, `find_route`, `match_route`, `iter_routers`, `response_type`, `add_route_dependency`, `add_lifespan`, `iter_operations`, `operation_for`, `as_dependant` |
+| `fastapi_injected.walk` | `iter_endpoints`, `Endpoint`, `iter_calls`, `iter_security` |
 
 Anything else, including every module whose name starts with an underscore, is machinery that can change in a patch release.
 

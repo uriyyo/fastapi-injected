@@ -1,4 +1,3 @@
-import inspect
 from collections.abc import Callable
 from functools import cache
 from typing import TYPE_CHECKING, Annotated, Any
@@ -8,6 +7,7 @@ from fastapi import Depends, HTTPException, status
 from ._bind import _dep_annotation
 from ._calls import is_static_annotation
 from ._deps_tp import unwrap_tp
+from .signature import Signature
 
 
 def not_found() -> Exception:
@@ -21,11 +21,7 @@ def _build(annotation: Any, error: Callable[[], BaseException], /) -> Callable[.
 
         return value
 
-    require.__signature__ = inspect.Signature(  # type: ignore[ty:missing-attribute]
-        [inspect.Parameter("value", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation)],
-    )
-
-    return require
+    return Signature.build(value=annotation).apply(require)
 
 
 # one callable per source dependency, so FastAPI shares its result within a request
@@ -48,10 +44,8 @@ else:
 
         def __class_getitem__(cls, item: Any) -> Any:
             match item:
-                case (tp, dep):
-                    return not_none(tp, dep)
-                case (tp, dep, error):
-                    return not_none(tp, dep, error)
+                case (tp, dep, *error) if len(error) <= 1:
+                    return not_none(tp, dep, *error)
                 case _:
                     raise TypeError(f"NotNone[...] takes a type, a dependency and optionally an error, got {item!r}")
 

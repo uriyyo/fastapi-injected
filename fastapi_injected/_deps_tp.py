@@ -33,30 +33,37 @@ def unwrap_tp(tp: Any) -> Any:
     return tp
 
 
-def _get_annotated_metadata(tp: Any) -> tuple[Any, ...]:
-    if get_origin(tp) is Annotated:
-        return get_args(tp)[1:]
+def annotated_parts(tp: Any, /) -> tuple[Any, tuple[Any, ...]] | None:
+    # `Annotated[X, *metadata]` as `(X, metadata)`, through type aliases; None for anything else
+    tp = unwrap_tp(tp)
 
-    return ()
+    if get_origin(tp) is not Annotated:
+        return None
+
+    base, *metadata = get_args(tp)
+
+    return base, (*metadata,)
+
+
+def _metadata(tp: Any, /) -> tuple[Any, ...]:
+    match annotated_parts(tp):
+        case (_, metadata):
+            return metadata
+        case _:
+            return ()
 
 
 def is_dep(tp: Any) -> bool:
-    tp = unwrap_tp(tp)
-
-    return any(isinstance(tp, Depends) for tp in _get_annotated_metadata(tp))
+    return any(isinstance(meta, Depends) for meta in _metadata(tp))
 
 
 def is_request_param(tp: Any) -> bool:
     # a marker FastAPI reads from the request: `Header()`, `Query()`, `Path()`, `Cookie()`, the body ones
-    tp = unwrap_tp(tp)
-
-    return any(isinstance(tp, Param | Body) for tp in _get_annotated_metadata(tp))
+    return any(isinstance(meta, Param | Body) for meta in _metadata(tp))
 
 
 def is_arg(tp: Any) -> bool:
-    tp = unwrap_tp(tp)
-
-    return any(metadata is ArgMarker for metadata in _get_annotated_metadata(tp))
+    return any(meta is ArgMarker for meta in _metadata(tp))
 
 
 def _enforce_dep(tp: Any) -> Any:
@@ -117,8 +124,21 @@ def as_depends(dep: DependsSource, /) -> params.Depends:
             return params.Depends(dep)
 
 
+def as_annotation(dep: DependsSource | params.Param | params.Body, /) -> Any:
+    match dep:
+        case params.Param() | params.Body():
+            marker = dep
+        case _:
+            marker = as_depends(dep)
+
+    # built directly: typing's cache would keep the last aliases, and the markers they carry, alive
+    return typing._AnnotatedAlias(Any, (marker,))  # type: ignore[ty:missing-attribute] # noqa: SLF001
+
+
 __all__ = [
     "DependsSource",
+    "annotated_parts",
+    "as_annotation",
     "as_depends",
     "is_arg",
     "is_dep",

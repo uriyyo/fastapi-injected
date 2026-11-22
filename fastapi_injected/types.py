@@ -8,10 +8,7 @@ from typing_extensions import TypeForm, sentinel
 
 from ._errors import InvalidMarkerError
 
-if TYPE_CHECKING:
-    Injected: Any = object()
-else:
-    Injected = sentinel("Injected")
+Injected: Any = sentinel("Injected")
 
 if TYPE_CHECKING:
     type Dep[T] = Annotated[T, Depends()]
@@ -20,10 +17,7 @@ else:
 
     Dep = Annotated[_T, Depends()]
 
-if TYPE_CHECKING:
-    ArgMarker: Any = object()
-else:
-    ArgMarker = sentinel("ArgMarker")
+ArgMarker = sentinel("ArgMarker")
 
 if TYPE_CHECKING:
     type Arg[T] = Annotated[T, ...]

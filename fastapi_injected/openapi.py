@@ -8,7 +8,7 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from starlette.routing import BaseRoute
 
 from ._fastapi_compat import routes_version as routes_version_of
-from .reflect import iter_calls
+from .walk import iter_calls
 
 
 @runtime_checkable
